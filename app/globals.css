@@ -278,11 +278,27 @@ h3 {
   fill: var(--surface-strong);
   stroke: var(--ink);
   stroke-width: 6;
+  cursor: grab;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    filter 180ms ease,
+    transform 520ms cubic-bezier(0.16, 1.4, 0.36, 1);
 }
 
 .route-point.mid {
   fill: var(--pink);
   stroke-width: 4;
+}
+
+.route-point:hover {
+  filter: drop-shadow(0 10px 12px rgba(123, 63, 242, 0.22));
+}
+
+.route-point:active {
+  cursor: grabbing;
+  transform: translateY(58px) scaleY(0.72);
+  transition-duration: 120ms;
 }
 
 .forecast-chip {
@@ -728,6 +744,70 @@ h3 {
   line-height: 1.65;
 }
 
+.site-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  justify-content: center;
+  width: min(100% - 3rem, 1180px);
+  margin: 0 auto;
+  padding: 0 0 clamp(2.5rem, 5vw, 4rem);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.site-footer span {
+  color: var(--ink);
+}
+
+.site-footer a {
+  border-bottom: 1px solid rgba(20, 16, 24, 0.22);
+  padding-bottom: 0.22rem;
+}
+
+.legal-page {
+  min-height: 100dvh;
+  padding: clamp(1.2rem, 3vw, 2rem);
+  background:
+    radial-gradient(circle at 14% 12%, rgba(36, 217, 223, 0.24), transparent 24rem),
+    radial-gradient(circle at 86% 16%, rgba(255, 111, 177, 0.22), transparent 24rem),
+    linear-gradient(135deg, #fff8ed 0%, #fff7fb 45%, #edfaff 100%);
+}
+
+.legal-page > .wordmark {
+  display: inline-flex;
+  margin-bottom: clamp(3rem, 8vw, 6rem);
+}
+
+.legal-page section {
+  width: min(100%, 820px);
+  margin: 0 auto;
+}
+
+.legal-page h1 {
+  max-width: 10ch;
+  font-size: clamp(3rem, 8vw, 6.5rem);
+}
+
+.legal-page h2 {
+  max-width: none;
+  margin-top: 2.6rem;
+  font-size: clamp(1.55rem, 3vw, 2.4rem);
+  letter-spacing: -0.04em;
+}
+
+.legal-page p:not(.eyebrow) {
+  max-width: 44rem;
+  margin-top: 1rem;
+  color: var(--muted);
+  font-size: clamp(1.02rem, 1.6vw, 1.2rem);
+  line-height: 1.75;
+}
+
 @keyframes dot-pulse {
   0%,
   100% {
@@ -773,6 +853,7 @@ h3 {
 .demo-form,
 .recommendation-panel,
 .personalization-panel,
+.history-panel,
 .auth-panel {
   border: 1px solid rgba(255, 255, 255, 0.72);
   border-radius: 2rem;
@@ -834,7 +915,8 @@ h3 {
 }
 
 .search-row button,
-.location-results button {
+.location-results button,
+.location-tools button {
   border: 1px solid var(--line);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.62);
@@ -854,7 +936,8 @@ h3 {
 }
 
 .search-row button:hover,
-.location-results button:hover {
+.location-results button:hover,
+.location-tools button:hover {
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 10px 26px rgba(20, 16, 24, 0.08);
   transform: translateY(-1px);
@@ -864,6 +947,64 @@ h3 {
   cursor: wait;
   opacity: 0.6;
   transform: none;
+}
+
+.location-tools {
+  display: grid;
+  gap: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 1.2rem;
+  padding: 0.85rem;
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.location-tools > button {
+  min-height: 2.7rem;
+  padding: 0 0.9rem;
+}
+
+.location-tools button:disabled {
+  cursor: default;
+  opacity: 0.55;
+  transform: none;
+}
+
+.favourite-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.favourite-list article {
+  display: grid;
+  gap: 0.45rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.65rem;
+}
+
+.favourite-list article > button {
+  justify-content: flex-start;
+  padding: 0.52rem 0.7rem;
+  font-size: 0.82rem;
+}
+
+.favourite-list div,
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.favourite-list div button,
+.history-actions button {
+  min-height: 2rem;
+  padding: 0 0.62rem;
+  font-size: 0.72rem;
+}
+
+.location-tools p {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
 }
 
 .forecast-status {
@@ -898,6 +1039,17 @@ h3 {
   isolation: isolate;
 }
 
+.recommendation-panel::before {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 18% 18%, rgba(255, 255, 255, 0.34), transparent 18rem);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+  z-index: -1;
+}
+
 .recommendation-panel::after {
   position: absolute;
   inset: -8rem -7rem auto auto;
@@ -908,6 +1060,29 @@ h3 {
   content: "";
   filter: blur(20px);
   z-index: -1;
+}
+
+.recommendation-panel.weather-rain::before {
+  background-image:
+    linear-gradient(115deg, rgba(36, 217, 223, 0.28) 0 1px, transparent 1px 18px),
+    radial-gradient(circle at 18% 18%, rgba(36, 217, 223, 0.18), transparent 18rem);
+  background-size: 30px 30px, auto;
+  opacity: 0.5;
+  animation: weather-drift 900ms linear infinite;
+}
+
+.recommendation-panel.weather-wind::before {
+  background-image:
+    repeating-linear-gradient(165deg, transparent 0 24px, rgba(123, 63, 242, 0.12) 24px 27px),
+    radial-gradient(circle at 72% 22%, rgba(36, 217, 223, 0.18), transparent 16rem);
+  opacity: 0.55;
+  animation: weather-drift 1400ms linear infinite;
+}
+
+.recommendation-panel.weather-heat::before {
+  background: radial-gradient(circle at 74% 20%, rgba(255, 111, 177, 0.26), transparent 16rem);
+  opacity: 0.72;
+  animation: heat-breathe 2200ms ease-in-out infinite;
 }
 
 .panel-topline {
@@ -1092,6 +1267,7 @@ h3 {
 }
 
 .personalization-panel,
+.history-panel,
 .auth-panel {
   padding: 1.2rem;
 }
@@ -1106,6 +1282,17 @@ h3 {
 .auth-status {
   color: var(--muted);
   line-height: 1.55;
+}
+
+.auth-status.success {
+  position: relative;
+  border: 1px solid rgba(36, 217, 223, 0.52);
+  border-radius: 1rem;
+  padding: 0.72rem 0.82rem;
+  background: linear-gradient(135deg, rgba(36, 217, 223, 0.2), rgba(255, 255, 255, 0.72));
+  color: #11545a;
+  font-weight: 900;
+  animation: success-pop 720ms cubic-bezier(0.16, 1.4, 0.36, 1) both;
 }
 
 .auth-row {
@@ -1170,6 +1357,7 @@ h3 {
 
 .feedback-actions button,
 .auth-panel button,
+.reset-profile-button,
 .save-button {
   min-height: 2.8rem;
   border: 1px solid var(--line);
@@ -1187,6 +1375,7 @@ h3 {
 
 .feedback-actions button:hover,
 .auth-panel button:hover,
+.reset-profile-button:hover,
 .save-button:hover {
   background: rgba(255, 255, 255, 0.86);
   box-shadow: 0 10px 28px rgba(20, 16, 24, 0.1);
@@ -1196,6 +1385,124 @@ h3 {
 .save-button {
   width: 100%;
   margin-bottom: 1rem;
+}
+
+.reset-profile-button {
+  width: 100%;
+  min-height: 2.55rem;
+  margin: 0.9rem 0 1rem;
+  border-color: rgba(123, 63, 242, 0.18);
+  color: var(--violet);
+}
+
+.history-panel h3 {
+  font-size: clamp(1.45rem, 2.4vw, 2.2rem);
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+
+.history-list {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.history-list article {
+  border-top: 1px solid var(--line);
+  padding-top: 0.8rem;
+}
+
+.history-list span {
+  display: block;
+  color: var(--violet);
+  font-size: 0.72rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.history-list strong {
+  display: block;
+  margin-top: 0.28rem;
+  font-size: 0.98rem;
+}
+
+.history-list p,
+.history-empty {
+  margin-top: 0.32rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.history-detail {
+  display: grid;
+  gap: 0.15rem;
+  margin-top: 0.65rem;
+  border: 1px solid rgba(123, 63, 242, 0.16);
+  border-radius: 1rem;
+  padding: 0.7rem;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.history-detail p {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 760;
+}
+
+.history-actions {
+  margin-top: 0.65rem;
+}
+
+.history-actions button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+}
+
+@keyframes success-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+
+  60% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.02);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes weather-drift {
+  from {
+    background-position: 0 0, 0 0;
+  }
+
+  to {
+    background-position: 30px 30px, 0 0;
+  }
+}
+
+@keyframes heat-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.78;
+    transform: scale(1.04);
+  }
 }
 
 @media (max-width: 768px) {

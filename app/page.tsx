@@ -192,6 +192,12 @@ export default function Home() {
           ))}
         </div>
       </section>
+
+      <footer className="site-footer">
+        <span>ShortsAI</span>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+      </footer>
     </main>
   );
 }

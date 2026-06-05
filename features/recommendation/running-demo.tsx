@@ -7,10 +7,19 @@ import { AuthPanel } from "@/features/auth/auth-panel";
 import { createRecommendation } from "@/features/recommendation/engine";
 import { requestExplanation } from "@/features/recommendation/explanation";
 import {
+  deleteFavouriteLocation,
+  loadFavouriteLocations,
   loadProfileMemory,
+  loadRecommendationHistory,
+  resetProfileMemory,
   saveFeedback,
+  saveFavouriteLocation,
   saveProfileMemory,
   saveRecommendation,
+} from "@/features/recommendation/persistence";
+import type {
+  FavouriteLocation,
+  RecommendationHistoryItem,
 } from "@/features/recommendation/persistence";
 import { starterProfiles } from "@/features/recommendation/profiles";
 import {
@@ -26,6 +35,7 @@ import type {
   RecommendationInput,
   RunningIntensity,
   StarterProfile,
+  WeatherSnapshot,
 } from "@/types/domain";
 
 type PlannerForm = {
@@ -61,6 +71,11 @@ export function RunningDemo() {
   const [lastRecommendationId, setLastRecommendationId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState("Sign in to save your profile.");
   const [profileStatus, setProfileStatus] = useState("Using starter profile.");
+  const [favouriteStatus, setFavouriteStatus] = useState("");
+  const [favouriteLocations, setFavouriteLocations] = useState<FavouriteLocation[]>([]);
+  const [defaultFavouriteId, setDefaultFavouriteId] = useState<string | null>(null);
+  const [recommendationHistory, setRecommendationHistory] = useState<RecommendationHistoryItem[]>([]);
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
   const [explanation, setExplanation] = useState("");
   const [explanationStatus, setExplanationStatus] = useState(
     "Generate an explanation after the recommendation is ready.",
@@ -78,6 +93,16 @@ export function RunningDemo() {
   const isPersonalized = readiness >= 100;
   const shouldShowStarterProfile = !user || !isPersonalized;
   const shouldShowLocationResults = locationQuery.trim().length >= 2 && locationResults.length > 0;
+  const currentLocation = forecast?.location ?? null;
+  const currentLocationLabel = currentLocation ? formatLocationLabel(currentLocation) : "";
+  const isCurrentLocationSaved =
+    currentLocationLabel.length > 0 &&
+    favouriteLocations.some((location) => formatLocationLabel(location) === currentLocationLabel);
+  const profileLearningCopy = getProfileLearningCopy(
+    ratedRecommendations,
+    temperatureOffsetC,
+    profileStatus,
+  );
   const isSaveWarning =
     saveStatus.startsWith("Sign in") ||
     saveStatus.startsWith("Could not") ||
@@ -176,15 +201,36 @@ export function RunningDemo() {
       if (!user) {
         setProfileStatus("Using starter profile.");
         setSaveStatus("Sign in to save your profile.");
+        setFavouriteStatus("");
+        setFavouriteLocations([]);
+        setDefaultFavouriteId(null);
+        setRecommendationHistory([]);
         return;
       }
 
       try {
         setProfileStatus("Loading profile...");
-        const memory = await loadProfileMemory(user);
+        const [memory, history, favourites] = await Promise.all([
+          loadProfileMemory(user),
+          loadRecommendationHistory(user),
+          loadFavouriteLocations(user),
+        ]);
 
         if (ignore) {
           return;
+        }
+
+        setRecommendationHistory(history);
+        setFavouriteLocations(favourites);
+        const storedDefaultId = getStoredDefaultFavouriteId(user.id);
+        const defaultLocation = favourites.find((location) => location.favouriteId === storedDefaultId);
+
+        if (defaultLocation) {
+          setDefaultFavouriteId(defaultLocation.favouriteId);
+          setLocationQuery(formatLocationLabel(defaultLocation));
+          await selectLocation(defaultLocation, ignore);
+        } else {
+          setDefaultFavouriteId(null);
         }
 
         if (!memory) {
@@ -224,6 +270,7 @@ export function RunningDemo() {
       const recommendationId = await saveRecommendation(user, recommendationInput, recommendation);
       setLastRecommendationId(recommendationId);
       setSaveStatus("Recommendation saved.");
+      setRecommendationHistory(await loadRecommendationHistory(user));
       return recommendationId;
     } catch {
       setSaveStatus("Could not save recommendation.");
@@ -263,9 +310,100 @@ export function RunningDemo() {
 
       setSaveStatus("Feedback saved to your profile.");
       setProfileStatus("Profile updated.");
+      setRecommendationHistory(await loadRecommendationHistory(user));
     } catch {
       setSaveStatus("Could not save feedback.");
     }
+  }
+
+  async function saveCurrentLocationAsFavourite() {
+    if (!user) {
+      setFavouriteStatus("Sign in to save favourite locations.");
+      return;
+    }
+
+    if (!currentLocation) {
+      setFavouriteStatus("Choose a location first.");
+      return;
+    }
+
+    if (isCurrentLocationSaved) {
+      setFavouriteStatus("This location is already saved.");
+      return;
+    }
+
+    try {
+      setFavouriteStatus("Saving location...");
+      await saveFavouriteLocation(user, currentLocation);
+      setFavouriteLocations(await loadFavouriteLocations(user));
+      setFavouriteStatus("Location saved.");
+    } catch {
+      setFavouriteStatus("Could not save location.");
+    }
+  }
+
+  async function deleteFavourite(location: FavouriteLocation) {
+    if (!user) {
+      return;
+    }
+
+    try {
+      setFavouriteStatus("Removing location...");
+      await deleteFavouriteLocation(user, location.favouriteId);
+
+      if (defaultFavouriteId === location.favouriteId) {
+        clearStoredDefaultFavouriteId(user.id);
+        setDefaultFavouriteId(null);
+      }
+
+      setFavouriteLocations(await loadFavouriteLocations(user));
+      setFavouriteStatus("Location removed.");
+    } catch {
+      setFavouriteStatus("Could not remove location.");
+    }
+  }
+
+  function setDefaultFavourite(location: FavouriteLocation) {
+    if (!user) {
+      return;
+    }
+
+    setStoredDefaultFavouriteId(user.id, location.favouriteId);
+    setDefaultFavouriteId(location.favouriteId);
+    setFavouriteStatus("Default location set on this device.");
+  }
+
+  async function resetProfile() {
+    if (!user) {
+      setSaveStatus("Sign in to reset profile memory.");
+      return;
+    }
+
+    try {
+      setProfileStatus("Resetting profile...");
+      await resetProfileMemory(user, form.starterProfile);
+      setRatedRecommendations(0);
+      setTemperatureOffsetC(0);
+      setProfileStatus("Profile reset.");
+      setSaveStatus("Profile memory reset.");
+    } catch {
+      setProfileStatus("Could not reset profile.");
+    }
+  }
+
+  function repeatHistoryTiming(item: RecommendationHistoryItem) {
+    if (!item.createdAtInput && !item.returnHomeTime) {
+      setSaveStatus("This saved plan does not include repeatable timing yet.");
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      mode: item.activityMode,
+      startTime: item.createdAtInput ?? current.startTime,
+      returnHomeTime: item.returnHomeTime ?? current.returnHomeTime,
+    }));
+    setSaveStatus("Plan timing restored. Choose location if needed.");
   }
 
   async function generateExplanation() {
@@ -283,7 +421,9 @@ export function RunningDemo() {
 
       setExplanation(result.explanation);
       setExplanationStatus(
-        result.source === "openrouter"
+        result.limit?.exceeded
+          ? "AI limit reached. Using deterministic fallback explanation."
+          : result.source === "openrouter"
           ? "Explanation generated by OpenRouter."
           : "Using deterministic fallback explanation.",
       );
@@ -383,6 +523,38 @@ export function RunningDemo() {
             </div>
           ) : null}
 
+          {user ? (
+            <div className="location-tools field-wide">
+              <button
+                type="button"
+                onClick={saveCurrentLocationAsFavourite}
+                disabled={!currentLocation || isCurrentLocationSaved}
+              >
+                {isCurrentLocationSaved ? "Location saved" : "Save location"}
+              </button>
+              {favouriteLocations.length > 0 ? (
+                <div className="favourite-list" aria-label="Favourite locations">
+                  {favouriteLocations.map((location) => (
+                    <article key={location.favouriteId}>
+                      <button type="button" onClick={() => chooseLocation(location)}>
+                        {formatLocationLabel(location)}
+                      </button>
+                      <div>
+                        <button type="button" onClick={() => setDefaultFavourite(location)}>
+                          {defaultFavouriteId === location.favouriteId ? "Default" : "Set default"}
+                        </button>
+                        <button type="button" onClick={() => deleteFavourite(location)}>
+                          Delete
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+              {favouriteStatus ? <p>{favouriteStatus}</p> : null}
+            </div>
+          ) : null}
+
           <div className="field">
             <label htmlFor="activityMode">Activity</label>
             <select
@@ -470,7 +642,14 @@ export function RunningDemo() {
           </div>
         </form>
 
-        <article className="recommendation-panel" aria-live="polite">
+        <article
+          className={
+            recommendationInput
+              ? `recommendation-panel ${getWeatherMoodClass(recommendationInput.current)}`
+              : "recommendation-panel"
+          }
+          aria-live="polite"
+        >
           {recommendation && recommendationInput ? (
             <>
               <div className="panel-topline">
@@ -586,12 +765,58 @@ export function RunningDemo() {
               Save recommendation
             </button>
             <p className="profile-note">
-              Current comfort offset: {temperatureOffsetC > 0 ? "+" : ""}
-              {temperatureOffsetC} C. {profileStatus}
+              {profileLearningCopy}
             </p>
+            {user ? (
+              <button className="reset-profile-button" type="button" onClick={resetProfile}>
+                Reset profile memory
+              </button>
+            ) : null}
             <p className={isSaveWarning ? "save-status warning" : "save-status"}>
               {saveStatus}
             </p>
+          </aside>
+          <aside className="history-panel">
+            <p className="eyebrow">History</p>
+            <h3>Recent plans</h3>
+            {recommendationHistory.length > 0 ? (
+              <div className="history-list">
+                {recommendationHistory.map((item) => (
+                  <article key={item.id}>
+                    <span>{formatShortDate(item.createdAt)}</span>
+                    <strong>{item.locationLabel}</strong>
+                    <p>
+                      {getActivityLabel(item.activityMode)} · {item.confidenceScore}% ·{" "}
+                      {item.headline}
+                    </p>
+                    {expandedHistoryId === item.id ? (
+                      <div className="history-detail">
+                        <p>Outfit: {item.outfitSummary}</p>
+                        {item.createdAtInput ? <p>Start: {formatShortDate(item.createdAtInput)}</p> : null}
+                        {item.returnHomeTime ? <p>Return: {formatShortDate(item.returnHomeTime)}</p> : null}
+                      </div>
+                    ) : null}
+                    <div className="history-actions">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedHistoryId(expandedHistoryId === item.id ? null : item.id)
+                        }
+                      >
+                        {expandedHistoryId === item.id ? "Hide details" : "Details"}
+                      </button>
+                      <button type="button" onClick={() => repeatHistoryTiming(item)}>
+                        Repeat timing
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="history-empty">
+                Save recommendations to build a useful planning history.
+              </p>
+            )}
           </aside>
         </div>
       </div>
@@ -708,4 +933,66 @@ function getActivityLabel(mode: ActivityMode) {
   }
 
   return "Everyday / commute plan";
+}
+
+function formatShortDate(value: string) {
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function getWeatherMoodClass(weather: WeatherSnapshot) {
+  if (weather.rainProbabilityPercent >= 55) {
+    return "weather-rain";
+  }
+
+  if (weather.windKph >= 25) {
+    return "weather-wind";
+  }
+
+  if (weather.temperatureC >= 24) {
+    return "weather-heat";
+  }
+
+  return "weather-calm";
+}
+
+function getProfileLearningCopy(
+  ratedRecommendations: number,
+  temperatureOffsetC: number,
+  profileStatus: string,
+) {
+  const offset =
+    temperatureOffsetC === 0
+      ? "no comfort offset yet"
+      : `${temperatureOffsetC > 0 ? "+" : ""}${temperatureOffsetC} C comfort offset`;
+
+  if (ratedRecommendations >= 15) {
+    return `Personalized profile active: ${ratedRecommendations} ratings, ${offset}. ${profileStatus}`;
+  }
+
+  return `Learning profile: ${ratedRecommendations}/15 ratings, ${offset}. ${profileStatus}`;
+}
+
+function getDefaultFavouriteStorageKey(userId: string) {
+  return `shorts-ai-default-location:${userId}`;
+}
+
+function getStoredDefaultFavouriteId(userId: string) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.localStorage.getItem(getDefaultFavouriteStorageKey(userId));
+}
+
+function setStoredDefaultFavouriteId(userId: string, favouriteId: string) {
+  window.localStorage.setItem(getDefaultFavouriteStorageKey(userId), favouriteId);
+}
+
+function clearStoredDefaultFavouriteId(userId: string) {
+  window.localStorage.removeItem(getDefaultFavouriteStorageKey(userId));
 }

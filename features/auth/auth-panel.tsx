@@ -16,6 +16,7 @@ export function AuthPanel({ onUserChange }: AuthPanelProps) {
       ? "Sign in to save feedback and history."
       : "Supabase is not configured.",
   );
+  const isMagicLinkSent = status.startsWith("Magic link sent");
 
   useEffect(() => {
     if (!isSupabaseConfigured()) {
@@ -111,7 +112,12 @@ export function AuthPanel({ onUserChange }: AuthPanelProps) {
           </div>
         </>
       )}
-      <p className="auth-status">{status}</p>
+      <p
+        key={status}
+        className={isMagicLinkSent ? "auth-status success" : "auth-status"}
+      >
+        {status}
+      </p>
     </aside>
   );
 }

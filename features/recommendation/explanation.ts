@@ -9,6 +9,11 @@ export type ExplanationRequest = {
 export type ExplanationResponse = {
   explanation: string;
   source: "openrouter" | "fallback";
+  limit?: {
+    exceeded?: boolean;
+    remaining?: number;
+    resetAt: string;
+  };
 };
 
 export async function requestExplanation(
