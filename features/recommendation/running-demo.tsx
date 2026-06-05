@@ -8,6 +8,7 @@ import { createRecommendation } from "@/features/recommendation/engine";
 import { requestExplanation } from "@/features/recommendation/explanation";
 import {
   deleteFavouriteLocation,
+  loadFeedbackStats,
   loadFavouriteLocations,
   loadProfileMemory,
   loadRecommendationHistory,
@@ -18,6 +19,7 @@ import {
   saveRecommendation,
 } from "@/features/recommendation/persistence";
 import type {
+  FeedbackStats,
   FavouriteLocation,
   RecommendationHistoryItem,
 } from "@/features/recommendation/persistence";
@@ -28,6 +30,7 @@ import {
   formatLocationLabel,
   searchLocations,
 } from "@/features/weather/open-meteo";
+import { publishWeatherPreviewForecast } from "@/features/weather/preview-events";
 import type { GeoLocation, LocationForecast } from "@/features/weather/open-meteo";
 import type {
   ActivityMode,
@@ -76,7 +79,9 @@ export function RunningDemo() {
   const [defaultFavouriteId, setDefaultFavouriteId] = useState<string | null>(null);
   const [recommendationHistory, setRecommendationHistory] = useState<RecommendationHistoryItem[]>([]);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+  const [feedbackStats, setFeedbackStats] = useState<FeedbackStats>(() => emptyFeedbackStats());
   const [explanation, setExplanation] = useState("");
+  const [followUpQuestion, setFollowUpQuestion] = useState("");
   const [explanationStatus, setExplanationStatus] = useState(
     "Generate an explanation after the recommendation is ready.",
   );
@@ -102,6 +107,7 @@ export function RunningDemo() {
     ratedRecommendations,
     temperatureOffsetC,
     profileStatus,
+    feedbackStats,
   );
   const isSaveWarning =
     saveStatus.startsWith("Sign in") ||
@@ -158,6 +164,7 @@ export function RunningDemo() {
       }
 
       setForecast(nextForecast);
+      publishWeatherPreviewForecast(nextForecast);
       setWeatherStatus(`Using live forecast for ${formatLocationLabel(location)}.`);
     } catch {
       if (!ignore) {
@@ -205,15 +212,17 @@ export function RunningDemo() {
         setFavouriteLocations([]);
         setDefaultFavouriteId(null);
         setRecommendationHistory([]);
+        setFeedbackStats(emptyFeedbackStats());
         return;
       }
 
       try {
         setProfileStatus("Loading profile...");
-        const [memory, history, favourites] = await Promise.all([
+        const [memory, history, favourites, stats] = await Promise.all([
           loadProfileMemory(user),
           loadRecommendationHistory(user),
           loadFavouriteLocations(user),
+          loadFeedbackStats(user),
         ]);
 
         if (ignore) {
@@ -222,6 +231,7 @@ export function RunningDemo() {
 
         setRecommendationHistory(history);
         setFavouriteLocations(favourites);
+        setFeedbackStats(stats);
         const storedDefaultId = getStoredDefaultFavouriteId(user.id);
         const defaultLocation = favourites.find((location) => location.favouriteId === storedDefaultId);
 
@@ -285,6 +295,7 @@ export function RunningDemo() {
 
     setRatedRecommendations(nextRatedRecommendations);
     setTemperatureOffsetC(nextTemperatureOffsetC);
+    setFeedbackStats((current) => projectFeedbackStats(current, feedback));
 
     if (!user) {
       setSaveStatus("Feedback adjusted this session. Sign in to keep it.");
@@ -302,14 +313,21 @@ export function RunningDemo() {
         await saveFeedback(user, recommendationId, feedback);
       }
 
+      const nextFeedbackStats = await loadFeedbackStats(user);
       await saveProfileMemory(user, {
         starterProfile: form.starterProfile,
         ratedRecommendations: nextRatedRecommendations,
         temperatureOffsetC: nextTemperatureOffsetC,
+        comfortSummary: buildComfortSummary(
+          nextFeedbackStats,
+          nextTemperatureOffsetC,
+          nextRatedRecommendations,
+        ),
       });
 
       setSaveStatus("Feedback saved to your profile.");
       setProfileStatus("Profile updated.");
+      setFeedbackStats(nextFeedbackStats);
       setRecommendationHistory(await loadRecommendationHistory(user));
     } catch {
       setSaveStatus("Could not save feedback.");
@@ -384,6 +402,7 @@ export function RunningDemo() {
       await resetProfileMemory(user, form.starterProfile);
       setRatedRecommendations(0);
       setTemperatureOffsetC(0);
+      setFeedbackStats(emptyFeedbackStats());
       setProfileStatus("Profile reset.");
       setSaveStatus("Profile memory reset.");
     } catch {
@@ -406,7 +425,7 @@ export function RunningDemo() {
     setSaveStatus("Plan timing restored. Choose location if needed.");
   }
 
-  async function generateExplanation() {
+  async function generateExplanation(question?: string) {
     if (!recommendationInput || !recommendation) {
       setExplanationStatus("Choose a location first.");
       return;
@@ -417,9 +436,11 @@ export function RunningDemo() {
       const result = await requestExplanation({
         input: recommendationInput,
         recommendation,
+        question,
       });
 
       setExplanation(result.explanation);
+      setFollowUpQuestion("");
       setExplanationStatus(
         result.limit?.exceeded
           ? "AI limit reached. Using deterministic fallback explanation."
@@ -525,33 +546,38 @@ export function RunningDemo() {
 
           {user ? (
             <div className="location-tools field-wide">
-              <button
-                type="button"
-                onClick={saveCurrentLocationAsFavourite}
-                disabled={!currentLocation || isCurrentLocationSaved}
-              >
-                {isCurrentLocationSaved ? "Location saved" : "Save location"}
-              </button>
+              <div className="location-tool-row">
+                <button
+                  type="button"
+                  onClick={saveCurrentLocationAsFavourite}
+                  disabled={!currentLocation || isCurrentLocationSaved}
+                >
+                  {isCurrentLocationSaved ? "Saved" : "Save location"}
+                </button>
+                {favouriteStatus ? <p>{favouriteStatus}</p> : null}
+              </div>
               {favouriteLocations.length > 0 ? (
-                <div className="favourite-list" aria-label="Favourite locations">
-                  {favouriteLocations.map((location) => (
-                    <article key={location.favouriteId}>
-                      <button type="button" onClick={() => chooseLocation(location)}>
-                        {formatLocationLabel(location)}
-                      </button>
-                      <div>
-                        <button type="button" onClick={() => setDefaultFavourite(location)}>
-                          {defaultFavouriteId === location.favouriteId ? "Default" : "Set default"}
+                <details className="favourite-details">
+                  <summary>Saved locations ({favouriteLocations.length})</summary>
+                  <div className="favourite-list" aria-label="Favourite locations">
+                    {favouriteLocations.map((location) => (
+                      <article key={location.favouriteId}>
+                        <button type="button" onClick={() => chooseLocation(location)}>
+                          {formatLocationLabel(location)}
                         </button>
-                        <button type="button" onClick={() => deleteFavourite(location)}>
-                          Delete
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
+                        <div>
+                          <button type="button" onClick={() => setDefaultFavourite(location)}>
+                            {defaultFavouriteId === location.favouriteId ? "Default" : "Set default"}
+                          </button>
+                          <button type="button" onClick={() => deleteFavourite(location)}>
+                            Delete
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </details>
               ) : null}
-              {favouriteStatus ? <p>{favouriteStatus}</p> : null}
             </div>
           ) : null}
 
@@ -673,6 +699,17 @@ export function RunningDemo() {
                   Return feels like {recommendationInput.forecastAtReturn.feelsLikeC} C
                 </span>
               </div>
+              <div className="profile-signal-list" aria-label="Profile scoring">
+                <h4>Profile scoring</h4>
+                <div>
+                  {recommendation.profileSignals.map((signal) => (
+                    <span key={signal.label} className={`signal-impact-${signal.impact}`}>
+                      <strong>{signal.label}</strong>
+                      {signal.value}
+                    </span>
+                  ))}
+                </div>
+              </div>
               {running ? (
                 <>
                   <div className="phase-grid">
@@ -716,12 +753,28 @@ export function RunningDemo() {
               <div className="explanation-panel">
                 <div>
                   <h4>AI explanation</h4>
-                  <button type="button" onClick={generateExplanation}>
+                  <button type="button" onClick={() => generateExplanation()}>
                     Generate explanation
                   </button>
                 </div>
                 <p>{explanation || explanationStatus}</p>
                 {explanation ? <small>{explanationStatus}</small> : null}
+                <div className="follow-up-row">
+                  <input
+                    type="text"
+                    value={followUpQuestion}
+                    onChange={(event) => setFollowUpQuestion(event.target.value)}
+                    placeholder="Ask: do I need a hoodie?"
+                    aria-label="Ask a follow-up question about this recommendation"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => generateExplanation(followUpQuestion.trim())}
+                    disabled={followUpQuestion.trim().length < 3}
+                  >
+                    Ask
+                  </button>
+                </div>
               </div>
             </>
           ) : (
@@ -767,6 +820,20 @@ export function RunningDemo() {
             <p className="profile-note">
               {profileLearningCopy}
             </p>
+            <div className="quality-panel" aria-label="Recommendation quality">
+              <div>
+                <span>Good rate</span>
+                <strong>{feedbackStats.total > 0 ? `${feedbackStats.goodRate}%` : "New"}</strong>
+              </div>
+              <div>
+                <span>Too cold</span>
+                <strong>{feedbackStats.tooCold}</strong>
+              </div>
+              <div>
+                <span>Too warm</span>
+                <strong>{feedbackStats.tooWarm}</strong>
+              </div>
+            </div>
             {user ? (
               <button className="reset-profile-button" type="button" onClick={resetProfile}>
                 Reset profile memory
@@ -964,17 +1031,101 @@ function getProfileLearningCopy(
   ratedRecommendations: number,
   temperatureOffsetC: number,
   profileStatus: string,
+  feedbackStats: FeedbackStats,
 ) {
   const offset =
     temperatureOffsetC === 0
       ? "no comfort offset yet"
       : `${temperatureOffsetC > 0 ? "+" : ""}${temperatureOffsetC} C comfort offset`;
+  const quality =
+    feedbackStats.total > 0
+      ? `${feedbackStats.goodRate}% good across ${feedbackStats.total} ratings`
+      : "no quality trend yet";
 
   if (ratedRecommendations >= 15) {
-    return `Personalized profile active: ${ratedRecommendations} ratings, ${offset}. ${profileStatus}`;
+    return `${buildComfortSummary(feedbackStats, temperatureOffsetC, ratedRecommendations)} ${profileStatus}`;
   }
 
-  return `Learning profile: ${ratedRecommendations}/15 ratings, ${offset}. ${profileStatus}`;
+  return `Learning profile: ${ratedRecommendations}/15 ratings, ${offset}, ${quality}. ${profileStatus}`;
+}
+
+function buildComfortSummary(
+  feedbackStats: FeedbackStats,
+  temperatureOffsetC: number,
+  ratedRecommendations: number,
+) {
+  const offset =
+    temperatureOffsetC === 0
+      ? "no comfort offset"
+      : `${temperatureOffsetC > 0 ? "+" : ""}${temperatureOffsetC} C comfort offset`;
+
+  if (feedbackStats.dominantSignal === "too_cold") {
+    return `Personalized profile active: ${ratedRecommendations} ratings, ${offset}. You often report feeling too cold, so future plans bias warmer.`;
+  }
+
+  if (feedbackStats.dominantSignal === "too_warm") {
+    return `Personalized profile active: ${ratedRecommendations} ratings, ${offset}. You often report feeling too warm, so future plans bias lighter.`;
+  }
+
+  if (feedbackStats.dominantSignal === "good") {
+    return `Personalized profile active: ${ratedRecommendations} ratings, ${offset}. Most recent feedback is good, so current thresholds look stable.`;
+  }
+
+  return `Personalized profile active: ${ratedRecommendations} ratings, ${offset}. Feedback is mixed, so the profile keeps adjusting cautiously.`;
+}
+
+function emptyFeedbackStats(): FeedbackStats {
+  return {
+    total: 0,
+    good: 0,
+    tooCold: 0,
+    tooWarm: 0,
+    goodRate: 0,
+    dominantSignal: "none",
+  };
+}
+
+function projectFeedbackStats(
+  current: FeedbackStats,
+  feedback: "good" | "too_cold" | "too_warm",
+): FeedbackStats {
+  const next = {
+    good: current.good + (feedback === "good" ? 1 : 0),
+    tooCold: current.tooCold + (feedback === "too_cold" ? 1 : 0),
+    tooWarm: current.tooWarm + (feedback === "too_warm" ? 1 : 0),
+  };
+  const total = current.total + 1;
+
+  return {
+    ...next,
+    total,
+    goodRate: Math.round((next.good / total) * 100),
+    dominantSignal: getDominantFeedbackSignal(next.good, next.tooCold, next.tooWarm),
+  };
+}
+
+function getDominantFeedbackSignal(
+  good: number,
+  tooCold: number,
+  tooWarm: number,
+): FeedbackStats["dominantSignal"] {
+  const max = Math.max(good, tooCold, tooWarm);
+
+  if (max === 0) {
+    return "none";
+  }
+
+  const leaders = [good, tooCold, tooWarm].filter((value) => value === max);
+
+  if (leaders.length > 1) {
+    return "mixed";
+  }
+
+  if (max === good) {
+    return "good";
+  }
+
+  return max === tooCold ? "too_cold" : "too_warm";
 }
 
 function getDefaultFavouriteStorageKey(userId: string) {

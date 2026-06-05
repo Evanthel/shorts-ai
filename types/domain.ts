@@ -79,6 +79,12 @@ export type RunningRecommendation = {
   visibilityReminder: boolean;
 };
 
+export type PersonalizationSignal = {
+  label: string;
+  value: string;
+  impact: "warmer" | "lighter" | "neutral";
+};
+
 export type Recommendation = {
   activityMode: ActivityMode;
   headline: string;
@@ -88,4 +94,5 @@ export type Recommendation = {
   explanationFacts: string[];
   riskWarnings: RiskWarning[];
   personalizationStage: "starter_profile" | "early_learning" | "personalized";
+  profileSignals: PersonalizationSignal[];
 };

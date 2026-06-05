@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { RunningDemo } from "@/features/recommendation/running-demo";
+import { HeroWeatherVisual } from "@/features/weather/hero-weather-visual";
 
 const systemSignals = [
   {
@@ -79,45 +81,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="hero-visual" aria-label="Weather route preview">
-            <div className="route-map">
-              <span className="map-grid" />
-              <svg viewBox="0 0 620 520" role="img" aria-label="Running route and forecast timeline">
-                <path
-                  className="terrain-line terrain-line-a"
-                  d="M20 118 C120 60 200 160 292 104 C400 36 478 128 604 72"
-                />
-                <path
-                  className="terrain-line terrain-line-b"
-                  d="M14 326 C126 256 196 386 312 302 C418 226 492 332 610 270"
-                />
-                <path
-                  className="route-line"
-                  d="M84 408 C134 314 220 352 252 250 C288 134 392 158 438 252 C480 336 536 284 560 174"
-                />
-                <circle className="route-point start" cx="84" cy="408" r="12" />
-                <circle className="route-point mid" cx="302" cy="184" r="9" />
-                <circle className="route-point end" cx="560" cy="174" r="12" />
-              </svg>
-              <div className="forecast-chip chip-start">
-                <span>Start</span>
-                <strong>18 C</strong>
-              </div>
-              <div className="forecast-chip chip-wind">
-                <span>Wind</span>
-                <strong>24 km/h</strong>
-              </div>
-              <div className="forecast-chip chip-return">
-                <span>Return</span>
-                <strong>9 C feels-like</strong>
-              </div>
-            </div>
-            <div className="hero-caption">
-              <span>Hourly forecast</span>
-              <span>Running intensity</span>
-              <span>Feedback memory</span>
-            </div>
-          </div>
+          <HeroWeatherVisual />
         </div>
       </section>
 
@@ -195,8 +159,8 @@ export default function Home() {
 
       <footer className="site-footer">
         <span>ShortsAI</span>
-        <a href="/privacy">Privacy</a>
-        <a href="/terms">Terms</a>
+        <Link href="/privacy">Privacy</Link>
+        <Link href="/terms">Terms</Link>
       </footer>
     </main>
   );

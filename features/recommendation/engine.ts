@@ -1,5 +1,6 @@
 import type {
   ClothingItem,
+  PersonalizationSignal,
   Recommendation,
   RecommendationInput,
   RiskWarning,
@@ -25,6 +26,7 @@ export function createRecommendation(input: RecommendationInput): Recommendation
   const personalizationStage = getPersonalizationStage(
     input.personalization.ratedRecommendations,
   );
+  const profileSignals = getPersonalizationSignals(input);
 
   if (input.activity.mode === "running") {
     const running = createRunningRecommendation(input);
@@ -46,6 +48,7 @@ export function createRecommendation(input: RecommendationInput): Recommendation
       ],
       riskWarnings,
       personalizationStage,
+      profileSignals,
     };
   }
 
@@ -63,6 +66,7 @@ export function createRecommendation(input: RecommendationInput): Recommendation
     ],
     riskWarnings,
     personalizationStage,
+    profileSignals,
   };
 }
 
@@ -225,6 +229,47 @@ function getConfidenceScore(weather: WeatherSnapshot, warnings: RiskWarning[]) {
   return Math.max(58, Math.min(94, 90 - dataPenalty - riskPenalty));
 }
 
+function getPersonalizationSignals(input: RecommendationInput): PersonalizationSignal[] {
+  const profile = starterProfiles[input.personalization.starterProfile];
+  const personalizationOffset = input.personalization.temperatureOffsetC ?? 0;
+  const activityImpact =
+    input.activity.mode === "running"
+      ? `${profile.runningHeatOffsetC + intensityHeatOffsets[input.activity.intensity ?? "medium"]} C body-heat adjustment`
+      : "no running heat adjustment";
+  const signals: PersonalizationSignal[] = [
+    {
+      label: "Starter profile",
+      value: `${profile.label} (${formatSignedC(profile.temperatureOffsetC)})`,
+      impact: profile.temperatureOffsetC < 0 ? "warmer" : profile.temperatureOffsetC > 0 ? "lighter" : "neutral",
+    },
+    {
+      label: "Feedback memory",
+      value:
+        personalizationOffset === 0
+          ? "No saved comfort shift yet"
+          : `${formatSignedC(personalizationOffset)} from rated plans`,
+      impact: personalizationOffset < 0 ? "warmer" : personalizationOffset > 0 ? "lighter" : "neutral",
+    },
+    {
+      label: "Activity load",
+      value: activityImpact,
+      impact: input.activity.mode === "running" ? "lighter" : "neutral",
+    },
+  ];
+
+  if (profile.prefersExtraLayer || input.forecastAtReturn.feelsLikeC < input.current.feelsLikeC - 3) {
+    signals.push({
+      label: "Return buffer",
+      value: profile.prefersExtraLayer
+        ? "Profile prefers carrying a layer"
+        : "Return forecast trends colder",
+      impact: "warmer",
+    });
+  }
+
+  return signals;
+}
+
 function buildRunningHeadline(running: RunningRecommendation) {
   if (running.carryExtraLayer) {
     return "Run light, carry a warmer layer for after.";
@@ -257,4 +302,12 @@ function isLowVisibilityTime(time: string) {
 
 function uniqueItems(items: ClothingItem[]) {
   return Array.from(new Set(items));
+}
+
+function formatSignedC(value: number) {
+  if (value === 0) {
+    return "0 C";
+  }
+
+  return `${value > 0 ? "+" : ""}${value} C`;
 }

@@ -33,6 +33,15 @@ export type FavouriteLocation = GeoLocation & {
   favouriteId: string;
 };
 
+export type FeedbackStats = {
+  total: number;
+  good: number;
+  tooCold: number;
+  tooWarm: number;
+  goodRate: number;
+  dominantSignal: "good" | "too_cold" | "too_warm" | "mixed" | "none";
+};
+
 export async function loadProfileMemory(user: User): Promise<ProfileMemory | null> {
   if (!isSupabaseConfigured()) {
     return null;
@@ -86,7 +95,9 @@ export async function ensureProfile(user: User, input: RecommendationInput) {
 
 export async function saveProfileMemory(
   user: User,
-  memory: Omit<ProfileMemory, "personalizationScore" | "comfortSummary">,
+  memory: Omit<ProfileMemory, "personalizationScore" | "comfortSummary"> & {
+    comfortSummary?: string | null;
+  },
 ) {
   if (!isSupabaseConfigured()) {
     return;
@@ -94,10 +105,7 @@ export async function saveProfileMemory(
 
   const supabase = createBrowserSupabaseClient();
   const ratedRecommendations = memory.ratedRecommendations;
-  const comfortSummary =
-    ratedRecommendations >= 15
-      ? "Your recommendations are now primarily adjusted by feedback history."
-      : null;
+  const comfortSummary = ratedRecommendations >= 15 ? memory.comfortSummary ?? null : null;
 
   const { error } = await supabase.from("profiles").upsert({
     id: user.id,
@@ -112,6 +120,25 @@ export async function saveProfileMemory(
   if (error) {
     throw error;
   }
+}
+
+export async function loadFeedbackStats(user: User | null): Promise<FeedbackStats> {
+  if (!user || !isSupabaseConfigured()) {
+    return emptyFeedbackStats();
+  }
+
+  const supabase = createBrowserSupabaseClient();
+  const { data, error } = await supabase
+    .from("feedback")
+    .select("rating")
+    .eq("user_id", user.id)
+    .limit(250);
+
+  if (error) {
+    throw error;
+  }
+
+  return createFeedbackStats((data ?? []).map((item) => item.rating as FeedbackRating));
 }
 
 export async function resetProfileMemory(user: User | null, starterProfile: StarterProfile) {
@@ -335,4 +362,57 @@ function recommendationInputFromPayload(payload: unknown, key: "startTime" | "re
   };
 
   return recommendation.activity?.[key];
+}
+
+function emptyFeedbackStats(): FeedbackStats {
+  return {
+    total: 0,
+    good: 0,
+    tooCold: 0,
+    tooWarm: 0,
+    goodRate: 0,
+    dominantSignal: "none",
+  };
+}
+
+function createFeedbackStats(ratings: FeedbackRating[]): FeedbackStats {
+  const total = ratings.length;
+  const good = ratings.filter((rating) => rating === "good").length;
+  const tooCold = ratings.filter((rating) => rating === "too_cold").length;
+  const tooWarm = ratings.filter((rating) => rating === "too_warm").length;
+  const goodRate = total > 0 ? Math.round((good / total) * 100) : 0;
+  const dominantSignal = getDominantSignal(good, tooCold, tooWarm);
+
+  return {
+    total,
+    good,
+    tooCold,
+    tooWarm,
+    goodRate,
+    dominantSignal,
+  };
+}
+
+function getDominantSignal(
+  good: number,
+  tooCold: number,
+  tooWarm: number,
+): FeedbackStats["dominantSignal"] {
+  const max = Math.max(good, tooCold, tooWarm);
+
+  if (max === 0) {
+    return "none";
+  }
+
+  const leaders = [good, tooCold, tooWarm].filter((value) => value === max);
+
+  if (leaders.length > 1) {
+    return "mixed";
+  }
+
+  if (max === good) {
+    return "good";
+  }
+
+  return max === tooCold ? "too_cold" : "too_warm";
 }

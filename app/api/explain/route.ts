@@ -67,11 +67,12 @@ export async function POST(request: Request) {
           {
             role: "system",
             content:
-              "You explain clothing recommendations. Explicitly mention whether the plan is a run, walk, or standard commute/everyday plan, and mention the starter profile context. Do not change, add, or remove clothing items. Use only the structured recommendation and weather facts. Keep the answer under 80 words.",
+              "You explain clothing recommendations and answer short follow-up questions about the current recommendation. Explicitly mention whether the plan is a run, walk, or standard commute/everyday plan when useful, and mention the starter profile context. Do not change, add, or remove clothing items. Use only the structured recommendation, weather facts, and the user's follow-up question. Keep the answer under 80 words.",
           },
           {
             role: "user",
             content: JSON.stringify({
+              question: payload.question,
               activity: payload.input.activity,
               personalization: payload.input.personalization,
               weather: {
