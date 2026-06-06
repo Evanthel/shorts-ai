@@ -38,3 +38,6 @@ venv/
 
 # Supabase
 .supabase/
+
+# Local presentation planning
+docs/presentation-outline.md

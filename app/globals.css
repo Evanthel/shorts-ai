@@ -1535,10 +1535,24 @@ h3 {
   text-transform: uppercase;
 }
 
+.explanation-message,
 .explanation-panel p {
   color: var(--muted);
   font-size: 1rem;
   line-height: 1.6;
+}
+
+.explanation-message.warning {
+  border: 1px solid rgba(255, 111, 177, 0.48);
+  border-radius: 1rem;
+  padding: 0.82rem;
+  background: linear-gradient(135deg, rgba(255, 111, 177, 0.18), rgba(255, 255, 255, 0.62));
+  color: #5e1138;
+  font-weight: 900;
+}
+
+.explanation-message.success {
+  color: var(--ink);
 }
 
 .explanation-panel small {
@@ -1664,9 +1678,19 @@ h3 {
 }
 
 .personalization-panel p:not(.eyebrow),
-.profile-note {
+.profile-note,
+.profile-change-note,
+.quality-summary {
   color: var(--muted);
   line-height: 1.6;
+}
+
+.profile-change-note,
+.quality-summary {
+  border-left: 3px solid rgba(123, 63, 242, 0.42);
+  padding-left: 0.7rem;
+  font-size: 0.9rem;
+  font-weight: 850;
 }
 
 .quality-panel {

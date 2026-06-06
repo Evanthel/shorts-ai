@@ -10,12 +10,48 @@ export type ExplanationRequest = {
 export type ExplanationResponse = {
   explanation: string;
   source: "openrouter" | "fallback";
+  scope?: "in_scope" | "out_of_scope";
   limit?: {
     exceeded?: boolean;
     remaining?: number;
     resetAt: string;
   };
 };
+
+const inScopeFollowUpTerms = [
+  "activity",
+  "commute",
+  "cold",
+  "cool",
+  "forecast",
+  "glove",
+  "hat",
+  "heat",
+  "hoodie",
+  "humidity",
+  "jacket",
+  "layer",
+  "pants",
+  "rain",
+  "recommendation",
+  "run",
+  "running",
+  "shirt",
+  "shoe",
+  "shorts",
+  "sleeve",
+  "temperature",
+  "visibility",
+  "walk",
+  "walking",
+  "warm",
+  "weather",
+  "wind",
+  "workout",
+];
+
+const outOfScopeExplanation =
+  "I can only answer follow-up questions about this plan's weather, activity, outfit, running, walking, commute, and the current recommendation.";
 
 export async function requestExplanation(
   payload: ExplanationRequest,
@@ -35,11 +71,38 @@ export async function requestExplanation(
   return (await response.json()) as ExplanationResponse;
 }
 
+export function isFollowUpInScope(question?: string) {
+  const normalized = question?.trim().toLowerCase();
+
+  if (!normalized) {
+    return true;
+  }
+
+  const words = normalized.match(/[a-z]+/g) ?? [];
+
+  return inScopeFollowUpTerms.some((term) =>
+    words.some(
+      (word) =>
+        word === term ||
+        word === `${term}s` ||
+        (term.length >= 4 && word.startsWith(term)),
+    ),
+  );
+}
+
+export function createOutOfScopeExplanation() {
+  return outOfScopeExplanation;
+}
+
 export function createFallbackExplanation({
   input,
   recommendation,
   question,
 }: ExplanationRequest) {
+  if (!isFollowUpInScope(question)) {
+    return createOutOfScopeExplanation();
+  }
+
   const activityLabel = getActivityExplanationLabel(input.activity.mode);
   const profileLabel = starterProfiles[input.personalization.starterProfile].label;
   const riskText =

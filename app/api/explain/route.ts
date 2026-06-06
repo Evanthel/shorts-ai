@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { createFallbackExplanation } from "@/features/recommendation/explanation";
+import {
+  createFallbackExplanation,
+  createOutOfScopeExplanation,
+  isFollowUpInScope,
+} from "@/features/recommendation/explanation";
 import type { ExplanationRequest } from "@/features/recommendation/explanation";
 
 const openRouterUrl = "https://openrouter.ai/api/v1/chat/completions";
@@ -23,6 +27,15 @@ export async function POST(request: Request) {
   const payload = (await request.json()) as ExplanationRequest;
   const apiKey = process.env.OPENROUTER_API_KEY;
   const appOrigin = request.headers.get("origin") ?? "https://shorts-ai.app";
+
+  if (!isFollowUpInScope(payload.question)) {
+    return NextResponse.json({
+      explanation: createOutOfScopeExplanation(),
+      source: "fallback",
+      scope: "out_of_scope",
+    });
+  }
+
   const rateLimit = await checkExplanationLimit(getClientKey(request));
 
   if (!rateLimit.allowed) {
@@ -30,6 +43,7 @@ export async function POST(request: Request) {
       {
         explanation: createFallbackExplanation(payload),
         source: "fallback",
+        scope: "in_scope",
         limit: {
           exceeded: true,
           resetAt: new Date(rateLimit.resetAt).toISOString(),
@@ -67,7 +81,7 @@ export async function POST(request: Request) {
           {
             role: "system",
             content:
-              "You explain clothing recommendations and answer short follow-up questions about the current recommendation. Explicitly mention whether the plan is a run, walk, or standard commute/everyday plan when useful, and mention the starter profile context. Do not change, add, or remove clothing items. Use only the structured recommendation, weather facts, and the user's follow-up question. Keep the answer under 80 words.",
+              "You explain clothing recommendations and answer short follow-up questions only when they are about this plan's weather, activity, outfit, running, walking, commute, or the current recommendation. If the question is outside that scope, refuse briefly and say you can only help with this plan's weather, activity, outfit, and recommendation. Explicitly mention whether the plan is a run, walk, or standard commute/everyday plan when useful, and mention the starter profile context. Do not change, add, or remove clothing items. Use only the structured recommendation, weather facts, and the user's follow-up question. Keep the answer under 80 words.",
           },
           {
             role: "user",
@@ -119,6 +133,7 @@ function createExplanationResponse(
     {
       explanation: payload.explanation ?? createFallbackExplanation(payload),
       source,
+      scope: "in_scope",
       limit: {
         remaining,
         resetAt: new Date(resetAt).toISOString(),
