@@ -121,7 +121,7 @@ export function HeroWeatherVisual() {
           <span>{moodLabel}</span>
           <strong>
             {weather
-              ? `${weather.rainProbabilityPercent}% rain · ${weather.windKph} km/h`
+              ? `${weather.rainProbabilityPercent}% rain | ${weather.windKph} km/h`
               : "Loading live weather"}
           </strong>
         </div>
@@ -163,11 +163,6 @@ export function HeroWeatherVisual() {
             </strong>
           </div>
         ))}
-      </div>
-      <div className="hero-caption">
-        <span>{weather ? `Wind ${weather.windKph} km/h` : "Current weather"}</span>
-        <span>{weather ? `Feels like ${weather.feelsLikeC} C` : "Route timing"}</span>
-        <span>Feedback memory</span>
       </div>
     </div>
   );

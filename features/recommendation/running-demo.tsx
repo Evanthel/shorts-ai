@@ -516,11 +516,10 @@ export function RunningDemo() {
   return (
     <section id="run-planner" className="demo-shell">
       <div className="demo-heading">
-        <p className="eyebrow">Planner</p>
-        <h2>Plan the outfit against the hourly forecast.</h2>
+        <h2>The planner becomes the product.</h2>
         <p>
-          Search a city, set the activity window, and ShortsAI turns weather
-          signals into an outfit for the plan and the way home.
+          Search a city, set the activity window, and ShortsAI turns forecast
+          timing into an outfit for the plan and the way home.
         </p>
       </div>
 
@@ -810,7 +809,6 @@ export function RunningDemo() {
             </>
           ) : (
             <div className="empty-recommendation">
-              <p className="eyebrow">Waiting for weather</p>
               <h3>Choose a location to generate a recommendation.</h3>
             </div>
           )}
@@ -819,9 +817,9 @@ export function RunningDemo() {
         <div className="side-stack">
           <AuthPanel onUserChange={setUser} />
           <aside className="personalization-panel">
-            <p className="eyebrow">Personalization</p>
+            <p className="panel-label">Personalization</p>
             {isPersonalized ? (
-              <h3>Good job 👟</h3>
+              <h3>Profile ready.</h3>
             ) : (
               <>
                 <h3>{readiness}% ready</h3>
@@ -877,7 +875,7 @@ export function RunningDemo() {
             </p>
           </aside>
           <aside className="history-panel">
-            <p className="eyebrow">History</p>
+            <p className="panel-label">History</p>
             <h3>Recent plans</h3>
             {recommendationHistory.length > 0 ? (
               <div className="history-list">
@@ -886,7 +884,7 @@ export function RunningDemo() {
                     <span>{formatShortDate(item.createdAt)}</span>
                     <strong>{item.locationLabel}</strong>
                     <p>
-                      {getActivityLabel(item.activityMode)} · {item.confidenceScore}% ·{" "}
+                      {getActivityLabel(item.activityMode)} | {item.confidenceScore}% |{" "}
                       {item.headline}
                     </p>
                     {expandedHistoryId === item.id ? (

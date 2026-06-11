@@ -86,7 +86,7 @@ export function AuthPanel({ onUserChange }: AuthPanelProps) {
 
   return (
     <aside className="auth-panel">
-      <p className="eyebrow">Account</p>
+      <p className="panel-label">Account</p>
       {user ? (
         <>
           <h3>Profile is active.</h3>

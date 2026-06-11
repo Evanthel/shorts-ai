@@ -4,25 +4,25 @@ import { HeroWeatherVisual } from "@/features/weather/hero-weather-visual";
 
 const systemSignals = [
   {
-    label: "01",
+    label: "Start",
     title: "Forecast window",
     body: "ShortsAI compares start, finish, and return-home conditions instead of using one static weather snapshot.",
     meta: "Temperature, feels-like, wind, rain, humidity, UV",
   },
   {
-    label: "02",
+    label: "Load",
     title: "Activity load",
     body: "Running, walking, and everyday plans are treated differently, so body heat and duration do not distort every recommendation.",
     meta: "Mode, intensity, duration, return time",
   },
   {
-    label: "03",
+    label: "Memory",
     title: "Comfort memory",
     body: "Feedback adjusts the next recommendation toward how the user actually feels outside.",
     meta: "Starter profile, saved offset, feedback count",
   },
   {
-    label: "04",
+    label: "Risk",
     title: "Risk layer",
     body: "The engine flags conditions that usually break outfit plans: colder returns, rain, wind, heat, and low visibility.",
     meta: "Warnings before explanation",
@@ -66,17 +66,17 @@ export default function Home() {
         <div className="hero-grid">
           <div className="hero-copy-block">
             <h1>ShortsAI</h1>
-            <h2>Weather-aware outfit planning for your next run.</h2>
+            <h2>Plan what to wear before the weather changes.</h2>
             <p className="hero-copy">
-              Live forecast data, return-home conditions, and personal comfort
-              feedback become one clear clothing recommendation.
+              Live forecast timing, activity load, and comfort memory become
+              one practical clothing call.
             </p>
             <div className="hero-actions">
               <a href="#run-planner" className="button button-primary">
                 Plan a run
               </a>
               <a href="#ai-angle" className="button button-secondary">
-                How the AI works
+                How AI helps
               </a>
             </div>
           </div>
@@ -90,7 +90,6 @@ export default function Home() {
       <section id="system-signals" className="content-section signal-section">
         <div className="section-header">
           <div>
-            <p className="eyebrow">System signals</p>
             <h2>Built around the moments where outfit plans fail.</h2>
           </div>
           <p>
@@ -138,7 +137,6 @@ export default function Home() {
 
       <section id="ai-angle" className="content-section ai-section">
         <div className="ai-statement">
-          <p className="eyebrow">AI angle</p>
           <h2>The model is useful because it has a narrow job.</h2>
           <p>
             Outfit decisions stay deterministic. AI only explains the result in
