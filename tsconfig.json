@@ -23,6 +23,9 @@
       }
     ],
     "paths": {
+      "@shorts-ai/core": [
+        "./packages/core/src/index.ts"
+      ],
       "@/*": [
         "./*"
       ]
@@ -36,6 +39,7 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
+    "apps/mobile",
     "node_modules"
   ]
 }

@@ -1,17 +1,19 @@
-export {
-  createFallbackExplanation,
-  createOutOfScopeExplanation,
-  isFollowUpInScope,
-  type ExplanationRequest,
-  type ExplanationResponse,
-} from "@shorts-ai/core";
-
 import type { ExplanationRequest, ExplanationResponse } from "@shorts-ai/core";
+import { createFallbackExplanation } from "@shorts-ai/core";
+import { mobileEnv } from "../lib/env";
 
-export async function requestExplanation(
+export async function requestMobileExplanation(
   payload: ExplanationRequest,
 ): Promise<ExplanationResponse> {
-  const response = await fetch("/api/explain", {
+  if (!mobileEnv.apiBaseUrl) {
+    return {
+      explanation: createFallbackExplanation(payload),
+      source: "fallback",
+      scope: "in_scope",
+    };
+  }
+
+  const response = await fetch(`${mobileEnv.apiBaseUrl.replace(/\/$/, "")}/api/explain`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

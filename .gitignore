@@ -6,11 +6,15 @@ node_modules/
 # Next.js
 .next/
 out/
+.vercel/
+.turbo/
+*.tsbuildinfo
 
 # Build outputs
 dist/
 build/
 coverage/
+web-build/
 
 # Logs
 *.log
@@ -23,6 +27,34 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+
+# Expo / React Native
+.expo/
+apps/**/.expo/
+android/
+ios/
+
+# Keys, certs, dumps, archives
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.mobileprovision
+id_rsa
+id_ed25519
+*.sql
+*.sqlite
+*.db
+*.dump
+*.bak
+*.backup
+*.zip
+*.tar
+*.gz
+*.tgz
+*.7z
 
 # Python
 __pycache__/
@@ -38,6 +70,9 @@ venv/
 
 # Supabase
 .supabase/
+supabase/schema.sql
+!supabase/migrations/
+!supabase/migrations/**/*.sql
 
 # Local presentation planning
 docs/presentation-outline.md

@@ -1,15 +1,20 @@
 import type { User } from "@supabase/supabase-js";
-import { createBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type {
   ActivityMode,
-  FeedbackStats,
   FeedbackRating,
+  FeedbackStats,
   GeoLocation,
   Recommendation,
   RecommendationInput,
   StarterProfile,
 } from "@shorts-ai/core";
-import { createFeedbackStats, emptyFeedbackStats, normalizeStarterProfile } from "@shorts-ai/core";
+import {
+  createFeedbackStats,
+  emptyFeedbackStats,
+  formatLocationLabel,
+  normalizeStarterProfile,
+} from "@shorts-ai/core";
+import { createMobileSupabaseClient, isSupabaseConfigured } from "../lib/supabase";
 
 export type ProfileMemory = {
   starterProfile: StarterProfile;
@@ -35,14 +40,12 @@ export type FavouriteLocation = GeoLocation & {
   favouriteId: string;
 };
 
-export type { FeedbackStats } from "@shorts-ai/core";
-
 export async function loadProfileMemory(user: User): Promise<ProfileMemory | null> {
   if (!isSupabaseConfigured()) {
     return null;
   }
 
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createMobileSupabaseClient();
   const { data, error } = await supabase
     .from("profiles")
     .select(
@@ -73,7 +76,7 @@ export async function ensureProfile(user: User, input: RecommendationInput) {
     return;
   }
 
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createMobileSupabaseClient();
 
   await supabase.from("profiles").upsert({
     id: user.id,
@@ -98,7 +101,7 @@ export async function saveProfileMemory(
     return;
   }
 
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createMobileSupabaseClient();
   const ratedRecommendations = memory.ratedRecommendations;
   const comfortSummary = ratedRecommendations >= 15 ? memory.comfortSummary ?? null : null;
 
@@ -122,7 +125,7 @@ export async function loadFeedbackStats(user: User | null): Promise<FeedbackStat
     return emptyFeedbackStats();
   }
 
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createMobileSupabaseClient();
   const { data, error } = await supabase
     .from("feedback")
     .select("rating")
@@ -141,7 +144,7 @@ export async function resetProfileMemory(user: User | null, starterProfile: Star
     return;
   }
 
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createMobileSupabaseClient();
   const { error } = await supabase.from("profiles").upsert({
     id: user.id,
     starter_profile: starterProfile,
@@ -166,7 +169,7 @@ export async function saveRecommendation(
     return null;
   }
 
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createMobileSupabaseClient();
   await ensureProfile(user, input);
 
   const { data, error } = await supabase
@@ -206,7 +209,7 @@ export async function saveFeedback(
     return;
   }
 
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createMobileSupabaseClient();
   const { error } = await supabase.from("feedback").insert({
     user_id: user.id,
     recommendation_id: recommendationId,
@@ -226,7 +229,7 @@ export async function loadRecommendationHistory(
     return [];
   }
 
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createMobileSupabaseClient();
   const { data, error } = await supabase
     .from("recommendations")
     .select("id, location_label, activity_mode, confidence_score, recommendation_payload, created_at")
@@ -262,7 +265,7 @@ export async function loadFavouriteLocations(user: User | null): Promise<Favouri
     return [];
   }
 
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createMobileSupabaseClient();
   const { data, error } = await supabase
     .from("favourite_locations")
     .select("id, label, latitude, longitude, created_at")
@@ -293,8 +296,8 @@ export async function saveFavouriteLocation(
     return null;
   }
 
-  const supabase = createBrowserSupabaseClient();
-  const label = [location.name, location.admin1, location.country].filter(Boolean).join(", ");
+  const supabase = createMobileSupabaseClient();
+  const label = formatLocationLabel(location);
   const existing = await supabase
     .from("favourite_locations")
     .select("id")
@@ -333,7 +336,7 @@ export async function deleteFavouriteLocation(user: User | null, favouriteId: st
     return;
   }
 
-  const supabase = createBrowserSupabaseClient();
+  const supabase = createMobileSupabaseClient();
   const { error } = await supabase
     .from("favourite_locations")
     .delete()

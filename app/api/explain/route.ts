@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   createFallbackExplanation,
@@ -8,12 +8,16 @@ import {
 import type { ExplanationRequest } from "@/features/recommendation/explanation";
 
 const openRouterUrl = "https://openrouter.ai/api/v1/chat/completions";
-const defaultModel = "openai/gpt-4o-mini";
+const defaultModel = "google/gemini-2.5-flash-lite";
 const explanationLimit = 10;
 const explanationWindowMs = 60 * 60 * 1000;
+const explanationWindowSeconds = Math.ceil(explanationWindowMs / 1000);
+const maxRequestBodyBytes = 25 * 1024;
+const maxQuestionLength = 300;
+const localRateLimitHashSecret = "shorts-ai-local-rate-limit-secret";
 const explanationBuckets = new Map<string, { count: number; resetAt: number }>();
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseUrl = getConfiguredEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL);
+const supabaseServiceRoleKey = getConfiguredEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 type OpenRouterResponse = {
   choices?: Array<{
@@ -24,7 +28,22 @@ type OpenRouterResponse = {
 };
 
 export async function POST(request: Request) {
-  const payload = (await request.json()) as ExplanationRequest;
+  const payloadResult = await readExplanationPayload(request);
+
+  if (!payloadResult.ok) {
+    logExplainEvent(payloadResult.reason);
+
+    return NextResponse.json(
+      {
+        error: payloadResult.message,
+      },
+      {
+        status: payloadResult.status,
+      },
+    );
+  }
+
+  const payload = payloadResult.payload;
   const apiKey = process.env.OPENROUTER_API_KEY;
   const appOrigin = request.headers.get("origin") ?? "https://shorts-ai.app";
 
@@ -36,9 +55,25 @@ export async function POST(request: Request) {
     });
   }
 
-  const rateLimit = await checkExplanationLimit(getClientKey(request));
+  const hashSecret = getRateLimitHashSecret();
+
+  if (!hashSecret) {
+    logExplainEvent("rate_limit_hash_secret_missing");
+
+    return createRateLimitUnavailableResponse(payload);
+  }
+
+  const rateLimit = await checkExplanationLimit(hashClientKey(getClientKey(request), hashSecret));
+
+  if (!rateLimit) {
+    logExplainEvent("persistent_rate_limit_required_unavailable");
+
+    return createRateLimitUnavailableResponse(payload);
+  }
 
   if (!rateLimit.allowed) {
+    logExplainEvent("rate_limit_exceeded");
+
     return NextResponse.json(
       {
         explanation: createFallbackExplanation(payload),
@@ -119,8 +154,228 @@ export async function POST(request: Request) {
       rateLimit.resetAt,
     );
   } catch {
+    logExplainEvent("openrouter_fallback");
+
     return createExplanationResponse(payload, "fallback", rateLimit.remaining, rateLimit.resetAt);
   }
+}
+
+type PayloadParseResult =
+  | {
+      ok: true;
+      payload: ExplanationRequest;
+    }
+  | {
+      ok: false;
+      message: string;
+      reason: string;
+      status: 400 | 413 | 415;
+    };
+
+async function readExplanationPayload(request: Request): Promise<PayloadParseResult> {
+  const contentLength = Number(request.headers.get("content-length"));
+
+  if (Number.isFinite(contentLength) && contentLength > maxRequestBodyBytes) {
+    return {
+      ok: false,
+      message: "Explanation request is too large.",
+      reason: "request_too_large",
+      status: 413,
+    };
+  }
+
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (contentType && !contentType.toLowerCase().includes("application/json")) {
+    return {
+      ok: false,
+      message: "Explanation request must be JSON.",
+      reason: "unsupported_content_type",
+      status: 415,
+    };
+  }
+
+  const body = await request.text();
+
+  if (new TextEncoder().encode(body).length > maxRequestBodyBytes) {
+    return {
+      ok: false,
+      message: "Explanation request is too large.",
+      reason: "request_too_large",
+      status: 413,
+    };
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return {
+      ok: false,
+      message: "Explanation request must contain valid JSON.",
+      reason: "invalid_json",
+      status: 400,
+    };
+  }
+
+  if (isRecord(parsed) && typeof parsed.question === "string" && parsed.question.trim().length > maxQuestionLength) {
+    return {
+      ok: false,
+      message: `Question must be ${maxQuestionLength} characters or fewer.`,
+      reason: "question_too_long",
+      status: 400,
+    };
+  }
+
+  const payload = normalizeExplanationPayload(parsed);
+
+  if (!payload) {
+    return {
+      ok: false,
+      message: "Explanation request is missing required recommendation data.",
+      reason: "invalid_payload",
+      status: 400,
+    };
+  }
+
+  return {
+    ok: true,
+    payload,
+  };
+}
+
+function normalizeExplanationPayload(value: unknown): ExplanationRequest | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const input = value.input;
+  const recommendation = value.recommendation;
+  const question = normalizeQuestion(value.question);
+
+  if (question === null || !isRecommendationInput(input) || !isRecommendation(recommendation)) {
+    return null;
+  }
+
+  return {
+    input,
+    recommendation,
+    ...(question ? { question } : {}),
+  };
+}
+
+function normalizeQuestion(value: unknown) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const question = value.trim();
+
+  if (question.length === 0) {
+    return undefined;
+  }
+
+  if (question.length > maxQuestionLength) {
+    return null;
+  }
+
+  return question;
+}
+
+function isRecommendationInput(value: unknown): value is ExplanationRequest["input"] {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isWeatherSnapshot(value.current) &&
+    isWeatherSnapshot(value.forecastAtFinish) &&
+    isWeatherSnapshot(value.forecastAtReturn) &&
+    isActivityInput(value.activity) &&
+    isPersonalizationInput(value.personalization)
+  );
+}
+
+function isWeatherSnapshot(value: unknown) {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isFiniteNumber(value.temperatureC) &&
+    isFiniteNumber(value.feelsLikeC) &&
+    isFiniteNumber(value.windKph) &&
+    isFiniteNumber(value.humidityPercent) &&
+    isFiniteNumber(value.rainProbabilityPercent) &&
+    isFiniteNumber(value.uvIndex) &&
+    isNonEmptyString(value.time) &&
+    isNonEmptyString(value.locationLabel)
+  );
+}
+
+function isActivityInput(value: unknown) {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    (value.mode === "running" || value.mode === "walking" || value.mode === "everyday") &&
+    isNonEmptyString(value.startTime) &&
+    isNonEmptyString(value.returnHomeTime) &&
+    isFiniteNumber(value.durationMinutes) &&
+    (value.intensity === undefined ||
+      value.intensity === "easy" ||
+      value.intensity === "medium" ||
+      value.intensity === "hard")
+  );
+}
+
+function isPersonalizationInput(value: unknown) {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    (value.starterProfile === "standard" ||
+      value.starterProfile === "always-cold" ||
+      value.starterProfile === "heat-sensitive") &&
+    isFiniteNumber(value.ratedRecommendations) &&
+    (value.temperatureOffsetC === undefined || isFiniteNumber(value.temperatureOffsetC))
+  );
+}
+
+function isRecommendation(value: unknown): value is ExplanationRequest["recommendation"] {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    (value.activityMode === "running" ||
+      value.activityMode === "walking" ||
+      value.activityMode === "everyday") &&
+    isNonEmptyString(value.headline) &&
+    Array.isArray(value.outfit) &&
+    isFiniteNumber(value.confidenceScore) &&
+    Array.isArray(value.explanationFacts) &&
+    Array.isArray(value.riskWarnings)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isNonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function createExplanationResponse(
@@ -150,10 +405,14 @@ function createExplanationResponse(
 }
 
 async function checkExplanationLimit(key: string) {
-  const persistentLimit = await checkPersistentExplanationLimit(hashClientKey(key));
+  const persistentLimit = await checkPersistentExplanationLimit(key);
 
   if (persistentLimit) {
     return persistentLimit;
+  }
+
+  if (requiresPersistentRateLimit()) {
+    return null;
   }
 
   const now = Date.now();
@@ -199,93 +458,113 @@ async function checkPersistentExplanationLimit(clientKey: string) {
     return null;
   }
 
-  const now = Date.now();
-  const resetAt = now + explanationWindowMs;
   const headers = {
     apikey: supabaseServiceRoleKey,
     Authorization: `Bearer ${supabaseServiceRoleKey}`,
     "Content-Type": "application/json",
   };
-  const tableUrl = `${supabaseUrl}/rest/v1/ai_rate_limits`;
-  const selectUrl = `${tableUrl}?client_key=eq.${encodeURIComponent(clientKey)}&select=client_key,count,reset_at`;
+  const rpcUrl = `${supabaseUrl}/rest/v1/rpc/consume_ai_rate_limit`;
 
   try {
-    const selectResponse = await fetch(selectUrl, {
+    const response = await fetch(rpcUrl, {
+      method: "POST",
       headers,
+      body: JSON.stringify({
+        p_client_key: clientKey,
+        p_limit: explanationLimit,
+        p_window_seconds: explanationWindowSeconds,
+      }),
       cache: "no-store",
     });
 
-    if (!selectResponse.ok) {
+    if (!response.ok) {
+      logExplainEvent("persistent_rate_limit_rpc_failed");
       return null;
     }
 
-    const rows = (await selectResponse.json()) as Array<{
-      client_key: string;
-      count: number;
-      reset_at: string;
-    }>;
-    const current = rows[0];
+    const rateLimit = parsePersistentRateLimit(await response.json());
 
-    if (!current || new Date(current.reset_at).getTime() <= now) {
-      const response = await fetch(tableUrl, {
-        method: "POST",
-        headers: {
-          ...headers,
-          Prefer: "resolution=merge-duplicates",
-        },
-        body: JSON.stringify({
-          client_key: clientKey,
-          count: 1,
-          reset_at: new Date(resetAt).toISOString(),
-          updated_at: new Date(now).toISOString(),
-        }),
-      });
-
-      if (!response.ok) {
-        return null;
-      }
-
-      return {
-        allowed: true,
-        remaining: explanationLimit - 1,
-        resetAt,
-      };
-    }
-
-    const currentResetAt = new Date(current.reset_at).getTime();
-
-    if (current.count >= explanationLimit) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt: currentResetAt,
-      };
-    }
-
-    const nextCount = current.count + 1;
-    const updateResponse = await fetch(`${tableUrl}?client_key=eq.${encodeURIComponent(clientKey)}`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify({
-        count: nextCount,
-        updated_at: new Date(now).toISOString(),
-      }),
-    });
-
-    if (!updateResponse.ok) {
+    if (!rateLimit) {
+      logExplainEvent("persistent_rate_limit_rpc_invalid_response");
       return null;
     }
 
-    return {
-      allowed: true,
-      remaining: explanationLimit - nextCount,
-      resetAt: currentResetAt,
-    };
+    return rateLimit;
   } catch {
+    logExplainEvent("persistent_rate_limit_unavailable");
     return null;
   }
 }
 
-function hashClientKey(key: string) {
-  return createHash("sha256").update(key).digest("hex");
+function parsePersistentRateLimit(value: unknown) {
+  const row = Array.isArray(value) ? value[0] : value;
+
+  if (!isRecord(row)) {
+    return null;
+  }
+
+  const resetAt = typeof row.reset_at === "string" ? new Date(row.reset_at).getTime() : NaN;
+
+  if (typeof row.allowed !== "boolean" || !isFiniteNumber(row.remaining) || !Number.isFinite(resetAt)) {
+    return null;
+  }
+
+  return {
+    allowed: row.allowed,
+    remaining: Math.max(0, Math.floor(row.remaining)),
+    resetAt,
+  };
+}
+
+function createRateLimitUnavailableResponse(payload: ExplanationRequest) {
+  return NextResponse.json(
+    {
+      explanation: createFallbackExplanation(payload),
+      source: "fallback",
+      scope: "in_scope",
+      error: "Explanation rate limiting is temporarily unavailable.",
+    },
+    {
+      status: 503,
+      headers: {
+        "Retry-After": "60",
+      },
+    },
+  );
+}
+
+function getRateLimitHashSecret() {
+  const configuredSecret = getConfiguredEnvValue(process.env.RATE_LIMIT_HASH_SECRET);
+
+  if (configuredSecret) {
+    return configuredSecret;
+  }
+
+  if (requiresPersistentRateLimit()) {
+    return null;
+  }
+
+  return supabaseServiceRoleKey ?? localRateLimitHashSecret;
+}
+
+function requiresPersistentRateLimit() {
+  return process.env.REQUIRE_PERSISTENT_RATE_LIMIT === "true" || process.env.NODE_ENV === "production";
+}
+
+function hashClientKey(key: string, secret: string) {
+  return createHmac("sha256", secret).update(key).digest("hex");
+}
+
+function getConfiguredEnvValue(value: string | undefined) {
+  const normalized = value?.trim();
+
+  if (!normalized || normalized.startsWith("your-") || normalized.includes("your-project")) {
+    return undefined;
+  }
+
+  return normalized;
+}
+
+function logExplainEvent(event: string) {
+  console.warn(`[api/explain] ${event}`);
 }

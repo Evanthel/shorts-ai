@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import {
   createFallbackExplanation,
   isFollowUpInScope,
-} from "@/features/recommendation/explanation";
-import { createRecommendation } from "@/features/recommendation/engine";
-import type { RecommendationInput, WeatherSnapshot } from "@/types/domain";
+} from "@shorts-ai/core";
+import { createRecommendation } from "@shorts-ai/core";
+import type { RecommendationInput, WeatherSnapshot } from "@shorts-ai/core";
 
 describe("explanation follow-up guardrail", () => {
   it("allows questions about the current outfit plan", () => {
@@ -46,7 +46,7 @@ function createInput(): RecommendationInput {
       intensity: "medium",
     },
     personalization: {
-      starterProfile: "runner",
+      starterProfile: "standard",
       ratedRecommendations: 3,
       temperatureOffsetC: 0,
     },

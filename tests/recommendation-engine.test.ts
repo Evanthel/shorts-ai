@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createRecommendation } from "@/features/recommendation/engine";
-import type { RecommendationInput, WeatherSnapshot } from "@/types/domain";
+import { createRecommendation } from "@shorts-ai/core";
+import type { RecommendationInput, WeatherSnapshot } from "@shorts-ai/core";
 
 describe("recommendation engine", () => {
   it("keeps warm running recommendations light and adds hydration guidance", () => {
@@ -79,7 +79,7 @@ function createInput(
       ...overrides.activity,
     },
     personalization: {
-      starterProfile: "runner",
+      starterProfile: "standard",
       ratedRecommendations: 3,
       temperatureOffsetC: 0,
       ...overrides.personalization,

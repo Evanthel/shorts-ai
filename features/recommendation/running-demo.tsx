@@ -4,7 +4,6 @@ import { useEffect, useState, useTransition } from "react";
 import type { ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
 import { AuthPanel } from "@/features/auth/auth-panel";
-import { createRecommendation } from "@/features/recommendation/engine";
 import {
   createOutOfScopeExplanation,
   isFollowUpInScope,
@@ -27,32 +26,35 @@ import type {
   FavouriteLocation,
   RecommendationHistoryItem,
 } from "@/features/recommendation/persistence";
-import { starterProfiles } from "@/features/recommendation/profiles";
 import {
+  buildComfortSummary,
+  buildRecommendationInput,
+  createInitialPlannerForm,
+  createRecommendation,
+  emptyFeedbackStats,
   fetchLocationForecast,
-  findClosestForecast,
   formatLocationLabel,
+  getFeedbackChangeNote,
+  getFeedbackTemperatureDelta,
+  getProfileLearningCopy,
+  getRecommendationQualitySummary,
+  projectFeedbackStats,
   searchLocations,
-} from "@/features/weather/open-meteo";
+  shiftPlannerStartTime,
+  starterProfiles,
+  updatePlannerDuration,
+} from "@shorts-ai/core";
 import { publishWeatherPreviewForecast } from "@/features/weather/preview-events";
-import type { GeoLocation, LocationForecast } from "@/features/weather/open-meteo";
 import type {
   ActivityMode,
   ClothingItem,
-  RecommendationInput,
+  GeoLocation,
+  LocationForecast,
+  PlannerForm,
   RunningIntensity,
   StarterProfile,
   WeatherSnapshot,
-} from "@/types/domain";
-
-type PlannerForm = {
-  mode: ActivityMode;
-  starterProfile: StarterProfile;
-  startTime: string;
-  durationMinutes: number;
-  returnHomeTime: string;
-  intensity: RunningIntensity;
-};
+} from "@shorts-ai/core";
 
 const clothingLabels: Record<ClothingItem, string> = {
   shorts: "Shorts",
@@ -67,7 +69,7 @@ const clothingLabels: Record<ClothingItem, string> = {
 };
 
 export function RunningDemo() {
-  const [form, setForm] = useState<PlannerForm>(() => createInitialForm());
+  const [form, setForm] = useState<PlannerForm>(() => createInitialPlannerForm());
   const [locationQuery, setLocationQuery] = useState("Warsaw");
   const [locationResults, setLocationResults] = useState<GeoLocation[]>([]);
   const [forecast, setForecast] = useState<LocationForecast | null>(null);
@@ -483,33 +485,12 @@ export function RunningDemo() {
   }
 
   function updateStartTime(nextStartTime: string) {
-    const previousStart = new Date(form.startTime);
-    const nextStart = new Date(nextStartTime);
-    const returnHome = new Date(form.returnHomeTime);
-    const deltaMs = nextStart.getTime() - previousStart.getTime();
-
-    if (!Number.isFinite(deltaMs)) {
-      updateForm("startTime", nextStartTime);
-      return;
-    }
-
-    setForm((current) => ({
-      ...current,
-      startTime: nextStartTime,
-      returnHomeTime: toDateTimeInputValue(new Date(returnHome.getTime() + deltaMs)),
-    }));
+    setForm((current) => shiftPlannerStartTime(current, nextStartTime));
     resetExplanation();
   }
 
   function updateDuration(nextDuration: number) {
-    const durationDelta = nextDuration - form.durationMinutes;
-    const returnHome = addMinutes(new Date(form.returnHomeTime), durationDelta);
-
-    setForm((current) => ({
-      ...current,
-      durationMinutes: nextDuration,
-      returnHomeTime: toDateTimeInputValue(returnHome),
-    }));
+    setForm((current) => updatePlannerDuration(current, nextDuration));
     resetExplanation();
   }
 
@@ -943,84 +924,6 @@ function StatusPill({
   );
 }
 
-function createInitialForm(): PlannerForm {
-  const start = roundToNextHour(new Date());
-  const returnHome = addMinutes(start, 90);
-
-  return {
-    mode: "running",
-    starterProfile: "runner",
-    startTime: toDateTimeInputValue(start),
-    durationMinutes: 45,
-    returnHomeTime: toDateTimeInputValue(returnHome),
-    intensity: "medium",
-  };
-}
-
-function buildRecommendationInput(
-  form: PlannerForm,
-  forecast: LocationForecast,
-  ratedRecommendations: number,
-  temperatureOffsetC: number,
-): RecommendationInput {
-  const finishTime = toDateTimeInputValue(addMinutes(new Date(form.startTime), form.durationMinutes));
-
-  return {
-    current: findClosestForecast(forecast.hourly, form.startTime),
-    forecastAtFinish: findClosestForecast(forecast.hourly, finishTime),
-    forecastAtReturn: findClosestForecast(forecast.hourly, form.returnHomeTime),
-    activity: {
-      mode: form.mode,
-      startTime: form.startTime,
-      durationMinutes: form.durationMinutes,
-      returnHomeTime: form.returnHomeTime,
-      intensity: form.mode === "running" ? form.intensity : undefined,
-    },
-    personalization: {
-      starterProfile: form.starterProfile,
-      ratedRecommendations,
-      temperatureOffsetC,
-    },
-  };
-}
-
-function roundToNextHour(date: Date) {
-  const next = new Date(date);
-  next.setMinutes(0, 0, 0);
-  next.setHours(next.getHours() + 1);
-
-  return next;
-}
-
-function addMinutes(date: Date, minutes: number) {
-  const next = new Date(date);
-  next.setMinutes(next.getMinutes() + minutes);
-
-  return next;
-}
-
-function toDateTimeInputValue(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
-function getFeedbackTemperatureDelta(feedback: "good" | "too_cold" | "too_warm") {
-  if (feedback === "too_cold") {
-    return -1;
-  }
-
-  if (feedback === "too_warm") {
-    return 1;
-  }
-
-  return 0;
-}
-
 function getActivityLabel(mode: ActivityMode) {
   if (mode === "running") {
     return "Run plan";
@@ -1056,152 +959,6 @@ function getWeatherMoodClass(weather: WeatherSnapshot) {
   }
 
   return "weather-calm";
-}
-
-function getProfileLearningCopy(
-  ratedRecommendations: number,
-  temperatureOffsetC: number,
-  profileStatus: string,
-  feedbackStats: FeedbackStats,
-) {
-  const offset =
-    temperatureOffsetC === 0
-      ? "no comfort offset yet"
-      : `${temperatureOffsetC > 0 ? "+" : ""}${temperatureOffsetC} C comfort offset`;
-  const quality =
-    feedbackStats.total > 0
-      ? `${feedbackStats.goodRate}% good across ${feedbackStats.total} ratings`
-      : "no quality trend yet";
-
-  if (ratedRecommendations >= 15) {
-    return `${buildComfortSummary(feedbackStats, temperatureOffsetC, ratedRecommendations)} ${profileStatus}`;
-  }
-
-  return `Learning profile: ${ratedRecommendations}/15 ratings, ${offset}, ${quality}. ${profileStatus}`;
-}
-
-function getFeedbackChangeNote(
-  feedback: "good" | "too_cold" | "too_warm",
-  nextTemperatureOffsetC: number,
-) {
-  const offset = `${nextTemperatureOffsetC > 0 ? "+" : ""}${nextTemperatureOffsetC} C`;
-
-  if (feedback === "too_cold") {
-    return `Future recommendations will bias warmer. Current comfort offset: ${offset}.`;
-  }
-
-  if (feedback === "too_warm") {
-    return `Future recommendations will bias lighter. Current comfort offset: ${offset}.`;
-  }
-
-  return `Profile marked this recommendation as accurate. Current comfort offset stays at ${offset}.`;
-}
-
-function getRecommendationQualitySummary(
-  feedbackStats: FeedbackStats,
-  temperatureOffsetC: number,
-  ratedRecommendations: number,
-) {
-  if (feedbackStats.total === 0) {
-    return "Quality trend will appear after the first saved rating.";
-  }
-
-  if (ratedRecommendations < 5) {
-    return "Profile is still learning; a few more ratings will make the trend useful.";
-  }
-
-  if (feedbackStats.goodRate >= 70) {
-    return "Your profile looks stable; most recommendations are landing well.";
-  }
-
-  if (feedbackStats.dominantSignal === "too_cold" || temperatureOffsetC < 0) {
-    return "Your profile is biased warmer because cold feedback is showing up.";
-  }
-
-  if (feedbackStats.dominantSignal === "too_warm" || temperatureOffsetC > 0) {
-    return "Your profile is biased lighter because warm feedback is showing up.";
-  }
-
-  return "Feedback is mixed, so the profile is still adjusting cautiously.";
-}
-
-function buildComfortSummary(
-  feedbackStats: FeedbackStats,
-  temperatureOffsetC: number,
-  ratedRecommendations: number,
-) {
-  const offset =
-    temperatureOffsetC === 0
-      ? "no comfort offset"
-      : `${temperatureOffsetC > 0 ? "+" : ""}${temperatureOffsetC} C comfort offset`;
-
-  if (feedbackStats.dominantSignal === "too_cold") {
-    return `Personalized profile active: ${ratedRecommendations} ratings, ${offset}. You often report feeling too cold, so future plans bias warmer.`;
-  }
-
-  if (feedbackStats.dominantSignal === "too_warm") {
-    return `Personalized profile active: ${ratedRecommendations} ratings, ${offset}. You often report feeling too warm, so future plans bias lighter.`;
-  }
-
-  if (feedbackStats.dominantSignal === "good") {
-    return `Personalized profile active: ${ratedRecommendations} ratings, ${offset}. Most recent feedback is good, so current thresholds look stable.`;
-  }
-
-  return `Personalized profile active: ${ratedRecommendations} ratings, ${offset}. Feedback is mixed, so the profile keeps adjusting cautiously.`;
-}
-
-function emptyFeedbackStats(): FeedbackStats {
-  return {
-    total: 0,
-    good: 0,
-    tooCold: 0,
-    tooWarm: 0,
-    goodRate: 0,
-    dominantSignal: "none",
-  };
-}
-
-function projectFeedbackStats(
-  current: FeedbackStats,
-  feedback: "good" | "too_cold" | "too_warm",
-): FeedbackStats {
-  const next = {
-    good: current.good + (feedback === "good" ? 1 : 0),
-    tooCold: current.tooCold + (feedback === "too_cold" ? 1 : 0),
-    tooWarm: current.tooWarm + (feedback === "too_warm" ? 1 : 0),
-  };
-  const total = current.total + 1;
-
-  return {
-    ...next,
-    total,
-    goodRate: Math.round((next.good / total) * 100),
-    dominantSignal: getDominantFeedbackSignal(next.good, next.tooCold, next.tooWarm),
-  };
-}
-
-function getDominantFeedbackSignal(
-  good: number,
-  tooCold: number,
-  tooWarm: number,
-): FeedbackStats["dominantSignal"] {
-  const max = Math.max(good, tooCold, tooWarm);
-
-  if (max === 0) {
-    return "none";
-  }
-
-  const leaders = [good, tooCold, tooWarm].filter((value) => value === max);
-
-  if (leaders.length > 1) {
-    return "mixed";
-  }
-
-  if (max === good) {
-    return "good";
-  }
-
-  return max === tooCold ? "too_cold" : "too_warm";
 }
 
 function getDefaultFavouriteStorageKey(userId: string) {
