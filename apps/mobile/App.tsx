@@ -91,6 +91,16 @@ const MINUTE_OPTIONS = Array.from(
   (_item, index) => index * MINUTE_STEP,
 );
 const FALLBACK_LOCATION_QUERY = "Warsaw";
+const TEMP_FEELING_OPTIONS: Array<[StarterProfile, string]> = [
+  ["always-cold", starterProfiles["always-cold"].label],
+  ["standard", starterProfiles.standard.label],
+  ["heat-sensitive", starterProfiles["heat-sensitive"].label],
+];
+const ACCENT = "#3154b8";
+const ACCENT_DARK = "#263f8c";
+const ACCENT_SOFT = "#e8ecfa";
+const ACCENT_LINE = "#b9c5eb";
+const ACCENT_TEXT = "#243b83";
 
 function normalizePickerMinute(value: number) {
   const rounded = Math.round(value / MINUTE_STEP) * MINUTE_STEP;
@@ -206,6 +216,9 @@ export default function App() {
     activePanel === "recommendation" ||
     activePanel === "ai" ||
     activePanel === "personalization";
+  const hasConfirmedLocation =
+    currentLocationLabel.length > 0 && locationQuery.trim() === currentLocationLabel;
+  const canShowRecommendation = Boolean(recommendation && hasConfirmedLocation);
   const runningReminders = running
     ? [
         running.carryExtraLayer ? "Extra layer" : null,
@@ -420,6 +433,12 @@ export default function App() {
   function updateForm<Key extends keyof PlannerForm>(key: Key, value: PlannerForm[Key]) {
     resetExplanation();
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function clearLocationSearch() {
+    setLocationQuery("");
+    setLocationResults([]);
+    setWeatherStatus("Type at least two characters to search.");
   }
 
   function resetExplanation() {
@@ -776,25 +795,44 @@ export default function App() {
         {activePanel === "planner" ? (
         <Section title="Location" meta={plannerMeta}>
           <View style={styles.searchRow}>
-            <TextInput
-              value={locationQuery}
-              onChangeText={(value) => {
-                setLocationQuery(value);
+            <View style={styles.searchInputWrap}>
+              <TextInput
+                value={locationQuery}
+                onChangeText={(value) => {
+                  setLocationQuery(value);
 
-                if (value.trim().length === 0) {
-                  setLocationResults([]);
-                }
-              }}
-              placeholder="Search city"
-              placeholderTextColor="#7c8178"
-              style={[styles.input, styles.searchInput]}
-              returnKeyType="search"
-              onSubmitEditing={runSearch}
-            />
+                  if (value.trim().length === 0) {
+                    setLocationResults([]);
+                  }
+                }}
+                placeholder="Search city"
+                placeholderTextColor="#7c8178"
+                style={[styles.input, styles.searchInput, styles.searchInputInside]}
+                returnKeyType="search"
+                clearButtonMode="while-editing"
+                selectTextOnFocus
+                autoCorrect={false}
+                onSubmitEditing={runSearch}
+              />
+              {locationQuery.length > 0 ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear location search"
+                  hitSlop={8}
+                  onPress={clearLocationSearch}
+                  style={({ pressed }) => [
+                    styles.clearSearchButton,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.clearSearchText}>×</Text>
+                </Pressable>
+              ) : null}
+            </View>
             <ActionButton label="Search" onPress={runSearch} disabled={busy} compact />
           </View>
 
-          {busy ? <ActivityIndicator color="#1f5f47" /> : null}
+          {busy ? <ActivityIndicator color={ACCENT} /> : null}
 
           {locationResults.length > 0 ? (
             <View style={styles.optionList}>
@@ -826,7 +864,7 @@ export default function App() {
             <View style={styles.controlBlock}>
               <Text style={styles.label}>Your temp feeling</Text>
               <SegmentedControl
-                options={Object.values(starterProfiles).map((profile) => [profile.id, profile.label])}
+                options={TEMP_FEELING_OPTIONS}
                 value={form.starterProfile}
                 onChange={(value) => updateForm("starterProfile", value as StarterProfile)}
               />
@@ -887,9 +925,9 @@ export default function App() {
           </View>
 
           <ActionButton
-            label={recommendation ? "Show recommendation" : "Choose a location"}
+            label={canShowRecommendation ? "Show recommendation" : "Choose a location"}
             onPress={() => setActivePanel("recommendation")}
-            disabled={!recommendation}
+            disabled={!canShowRecommendation}
           />
         </Section>
         ) : null}
@@ -1042,42 +1080,42 @@ export default function App() {
         {activePanel === "profile" ? (
           <>
         <Section title="Saved locations" meta={user ? favouriteStatus || "Defaults are stored on this device." : undefined}>
-          <ActionButton
-            label={
-              user
-                ? isCurrentLocationSaved
-                  ? "Location saved"
-                  : "Save current location"
-                : "Sign in to save favourite locations"
-            }
-            onPress={() => void saveCurrentLocationAsFavourite()}
-            disabled={user ? !currentLocation || isCurrentLocationSaved : false}
-          />
-          {favouriteLocations.map((location) => (
-            <View key={location.favouriteId} style={styles.listItem}>
-              <Pressable onPress={() => void chooseLocation(location)} style={styles.listMain}>
-                <Text style={styles.listTitle}>{formatLocationLabel(location)}</Text>
-                <Text style={styles.listMeta}>
-                  {defaultFavouriteId === location.favouriteId ? "Default" : "Saved"}
-                </Text>
-              </Pressable>
-              <View style={styles.listActions}>
-                <ActionButton
-                  label="Default"
-                  onPress={() => void setDefaultFavourite(location)}
-                  disabled={defaultFavouriteId === location.favouriteId}
-                  compact
-                  secondary
-                />
-                <ActionButton
-                  label="Delete"
-                  onPress={() => void deleteFavourite(location)}
-                  compact
-                  secondary
-                />
-              </View>
-            </View>
-          ))}
+          {user ? (
+            <>
+              <ActionButton
+                label={isCurrentLocationSaved ? "Location saved" : "Save current location"}
+                onPress={() => void saveCurrentLocationAsFavourite()}
+                disabled={!currentLocation || isCurrentLocationSaved}
+              />
+              {favouriteLocations.map((location) => (
+                <View key={location.favouriteId} style={styles.listItem}>
+                  <Pressable onPress={() => void chooseLocation(location)} style={styles.listMain}>
+                    <Text style={styles.listTitle}>{formatLocationLabel(location)}</Text>
+                    <Text style={styles.listMeta}>
+                      {defaultFavouriteId === location.favouriteId ? "Default" : "Saved"}
+                    </Text>
+                  </Pressable>
+                  <View style={styles.listActions}>
+                    <ActionButton
+                      label="Default"
+                      onPress={() => void setDefaultFavourite(location)}
+                      disabled={defaultFavouriteId === location.favouriteId}
+                      compact
+                      secondary
+                    />
+                    <ActionButton
+                      label="Delete"
+                      onPress={() => void deleteFavourite(location)}
+                      compact
+                      secondary
+                    />
+                  </View>
+                </View>
+              ))}
+            </>
+          ) : (
+            <Text style={styles.bodyText}>Sign in first, then save favourite locations here.</Text>
+          )}
         </Section>
 
         <Section title="History">
@@ -1123,7 +1161,7 @@ export default function App() {
               active={isOutfitNavActive}
               label="Outfit"
               onPress={() => setActivePanel("recommendation")}
-              disabled={!recommendation}
+              disabled={!canShowRecommendation}
             />
           </View>
         </View>
@@ -1451,9 +1489,11 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function OutfitPhase({ title, items }: { title: string; items: ClothingItem[] }) {
   return (
-    <View style={styles.phase}>
+    <View style={styles.phaseGroup}>
       <Text style={styles.phaseTitle}>{title}</Text>
-      <Text style={styles.phaseItems}>{items.map((item) => clothingLabels[item]).join(", ")}</Text>
+      <View style={styles.phase}>
+        <Text style={styles.phaseItems}>{items.map((item) => clothingLabels[item]).join(", ")}</Text>
+      </View>
     </View>
   );
 }
@@ -1552,7 +1592,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   profileButtonText: {
-    color: "#1f5f47",
+    color: ACCENT_TEXT,
     fontSize: 13,
     fontWeight: "800",
   },
@@ -1592,7 +1632,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   bottomNavItemActive: {
-    backgroundColor: "#1f5f47",
+    backgroundColor: ACCENT,
   },
   bottomNavItemDisabled: {
     opacity: 0.45,
@@ -1610,10 +1650,12 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   sectionProminent: {
-    backgroundColor: "#e3edde",
+    backgroundColor: ACCENT_SOFT,
     marginHorizontal: -18,
+    minHeight: 430,
     paddingHorizontal: 18,
     paddingVertical: 18,
+    paddingBottom: 58,
   },
   sectionHeader: {
     gap: 4,
@@ -1656,8 +1698,33 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  searchInputWrap: {
+    flex: 1,
+    minWidth: 0,
+    position: "relative",
+  },
   searchInput: {
     flex: 1,
+  },
+  searchInputInside: {
+    paddingRight: 48,
+  },
+  clearSearchButton: {
+    position: "absolute",
+    right: 7,
+    top: 7,
+    bottom: 7,
+    width: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    backgroundColor: "#ebe7dc",
+  },
+  clearSearchText: {
+    color: ACCENT_TEXT,
+    fontSize: 24,
+    fontWeight: "700",
+    lineHeight: 26,
   },
   optionList: {
     gap: 8,
@@ -1687,8 +1754,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#f8f6ef",
   },
   segmentActive: {
-    borderColor: "#1f5f47",
-    backgroundColor: "#1f5f47",
+    borderColor: ACCENT,
+    backgroundColor: ACCENT,
   },
   segmentText: {
     color: "#3e453d",
@@ -1772,7 +1839,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   timePickerDone: {
-    color: "#1f5f47",
+    color: ACCENT,
     fontSize: 15,
     fontWeight: "800",
   },
@@ -1833,7 +1900,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   wheelOptionTextActive: {
-    color: "#1f5f47",
+    color: ACCENT,
     fontSize: 28,
     fontWeight: "900",
   },
@@ -1865,19 +1932,21 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   phaseStack: {
-    gap: 8,
+    gap: 12,
+  },
+  phaseGroup: {
+    gap: 6,
   },
   phase: {
     borderWidth: 1,
-    borderColor: "#c7d7c2",
+    borderColor: ACCENT_LINE,
     borderRadius: 10,
     backgroundColor: "rgba(255, 253, 246, 0.58)",
     paddingHorizontal: 12,
     paddingVertical: 10,
-    gap: 5,
   },
   phaseTitle: {
-    color: "#315c40",
+    color: ACCENT_TEXT,
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
@@ -1901,7 +1970,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   reminderLabel: {
-    color: "#315c40",
+    color: ACCENT_TEXT,
     fontWeight: "800",
   },
   warningBlock: {
@@ -1928,7 +1997,7 @@ const styles = StyleSheet.create({
     color: "#42483f",
   },
   success: {
-    color: "#245e42",
+    color: ACCENT_DARK,
   },
   warning: {
     color: "#8b3f2f",
@@ -1936,7 +2005,7 @@ const styles = StyleSheet.create({
   button: {
     minHeight: 46,
     borderRadius: 8,
-    backgroundColor: "#1f5f47",
+    backgroundColor: ACCENT,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 16,
@@ -1946,9 +2015,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   buttonSecondary: {
-    backgroundColor: "#e4e0d5",
+    backgroundColor: "#fffdf6",
     borderWidth: 1,
-    borderColor: "#c7c0b1",
+    borderColor: ACCENT_LINE,
   },
   buttonDisabled: {
     backgroundColor: "#d6d1c4",
@@ -1959,7 +2028,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   buttonSecondaryText: {
-    color: "#252b25",
+    color: ACCENT_TEXT,
   },
   buttonDisabledText: {
     color: "#777d73",
@@ -1986,7 +2055,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: 8,
-    backgroundColor: "#1f5f47",
+    backgroundColor: ACCENT,
   },
   actionRow: {
     flexDirection: "row",

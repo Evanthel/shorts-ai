@@ -31,6 +31,42 @@ The first mobile beta follows a staged flow:
 
 The web app remains the public host and API surface. The iOS app uses the same domain logic through a shared TypeScript package.
 
+## Live Demo
+
+Public beta: [https://shorts-ai-theta.vercel.app](https://shorts-ai-theta.vercel.app)
+
+## Screenshots
+
+### Web
+
+![ShortsAI web home screen](./public/screenshots/shortsai-web-home.png)
+
+### Mobile
+
+<p>
+  <img src="./public/screenshots/shortsai-mobile-plan.jpeg" alt="ShortsAI mobile planner screen" width="260" />
+  <img src="./public/screenshots/shortsai-mobile-outfit.jpeg" alt="ShortsAI mobile outfit recommendation screen" width="260" />
+</p>
+
+## Beta Status
+
+What works in the current beta:
+
+- public Next.js web app, landing page, planner surface, and `/api/explain` endpoint
+- Expo iOS beta flow for location search, activity timing, return-home planning, temperature feeling, and running intensity
+- deterministic outfit recommendations with warm-up, main run, and post-run phases where relevant
+- weather risk signals, reminders, confidence, and fallback explanations
+- Supabase-backed sign-in, favourite locations, saved recommendations, feedback, and comfort memory when persistence is configured
+- optional AI explanation layer that explains the locked recommendation without changing outfit items
+
+What the beta does not support yet:
+
+- trained machine-learning personalization; feedback currently adjusts deterministic comfort rules
+- multi-location comparison, travel-mode planning, or calendar/wearable integrations
+- offline mode or guaranteed handling of sudden weather changes outside the forecast data
+- App Store distribution, Android packaging, or production push notifications
+- AI-generated outfit decisions; AI is scoped to explanations only
+
 ## Architecture
 
 ```mermaid
