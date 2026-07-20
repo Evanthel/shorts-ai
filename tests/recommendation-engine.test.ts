@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createRecommendation } from "@shorts-ai/core";
-import type { RecommendationInput, WeatherSnapshot } from "@shorts-ai/core";
+import { createRecommendation, createRecommendationResult } from "@shorts-ai/core";
+import type { ActivityInput, PersonalizationInput, RecommendationInput, WeatherSnapshot } from "@shorts-ai/core";
 
 describe("recommendation engine", () => {
   it("keeps warm running recommendations light and adds hydration guidance", () => {
@@ -33,14 +33,18 @@ describe("recommendation engine", () => {
     assert.ok(recommendation.running?.postRun.includes("light_jacket"));
   });
 
-  it("does not return running phases for everyday plans", () => {
+  it("does not return running phases for commute plans", () => {
     const recommendation = createRecommendation(
       createInput({
-        activity: { mode: "everyday", durationMinutes: 45 },
+        activity: {
+          mode: "commute",
+          durationMinutes: 45,
+          commute: { mode: "transit", outdoorMinutes: 20, canCarryLayer: true },
+        },
       }),
     );
 
-    assert.equal(recommendation.activityMode, "everyday");
+    assert.equal(recommendation.activityMode, "commute");
     assert.equal(recommendation.running, undefined);
     assert.ok(recommendation.outfit.length > 0);
   });
@@ -49,21 +53,47 @@ describe("recommendation engine", () => {
     const recommendation = createRecommendation(
       createInput({
         current: createWeather({ feelsLikeC: 18 }),
-        personalization: { temperatureOffsetC: -8, ratedRecommendations: 8 },
+        personalization: { temperatureOffsetC: -4, ratedRecommendations: 8 },
       }),
     );
 
     assert.ok(recommendation.outfit.includes("long_pants"));
     assert.ok(recommendation.outfit.includes("long_sleeve"));
   });
+
+  it("creates thermally ordered variants and removes duplicates", () => {
+    const threshold = createRecommendationResult(createInput({ current: createWeather({ feelsLikeC: 17 }) }));
+    assert.equal(threshold.variants[0].kind, "standard");
+    assert.ok(threshold.variants.some((variant) => variant.kind === "lighter"));
+    assert.ok(threshold.variants.some((variant) => variant.kind === "warmer"));
+
+    const stableHot = createRecommendationResult(createInput({ current: createWeather({ temperatureC: 28, feelsLikeC: 28 }) }));
+    assert.equal(stableHot.variants.length, 1);
+  });
+
+  it("keeps safety-required rain and cold items in every candidate", () => {
+    const result = createRecommendationResult(createInput({
+      current: createWeather({ feelsLikeC: 4, rainProbabilityPercent: 80 }),
+      forecastAtFinish: createWeather({ feelsLikeC: 3, rainProbabilityPercent: 80 }),
+      forecastAtReturn: createWeather({ feelsLikeC: 2, rainProbabilityPercent: 80 }),
+    }), { avoidedItems: ["rain_jacket", "gloves", "hat"] });
+
+    for (const variant of result.variants) {
+      assert.deepEqual(variant.requiredItems.sort(), ["gloves", "hat", "light_jacket", "rain_jacket"].sort());
+      for (const required of variant.requiredItems) assert.ok(variant.outfit.includes(required));
+    }
+  });
 });
 
-function createInput(
-  overrides: Partial<RecommendationInput> & {
-    activity?: Partial<RecommendationInput["activity"]>;
-    personalization?: Partial<RecommendationInput["personalization"]>;
-  } = {},
-): RecommendationInput {
+type InputOverrides = {
+  current?: WeatherSnapshot;
+  forecastAtFinish?: WeatherSnapshot;
+  forecastAtReturn?: WeatherSnapshot;
+  activity?: Partial<ActivityInput>;
+  personalization?: Partial<PersonalizationInput>;
+};
+
+function createInput(overrides: InputOverrides = {}): RecommendationInput {
   const current = overrides.current ?? createWeather();
 
   return {

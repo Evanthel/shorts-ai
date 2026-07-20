@@ -12,26 +12,35 @@ export default function PrivacyPage() {
         <p>
           ShortsAI stores account, profile, feedback, favourite location, and
           recommendation data only to make future clothing recommendations more
-          useful.
+          useful and to evaluate first-party recommendation quality.
         </p>
         <h2>Data we use</h2>
         <p>
           The app may store your email identifier through magic-link auth, saved
           profile settings, feedback labels, favourite locations, weather
-          snapshots, recommendation history, and AI explanation metadata.
+          snapshots, candidate exposures, recommendation history, outfit acceptance,
+          post-activity outcomes, and structured AI intent metadata.
         </p>
         <h2>Services we use</h2>
         <p>
           Open-Meteo provides location and forecast data. Supabase provides
           authentication and user-scoped storage. OpenRouter receives structured
-          weather, activity, profile, recommendation facts, and your current
-          explanation question only through the server-side explanation endpoint.
+          your current open question only through the server-side explanation endpoint
+          so it can classify a permitted intent. Raw question text is not stored or logged.
           Vercel Speed Insights collects web performance telemetry.
         </p>
         <h2>AI explanations</h2>
         <p>
-          AI receives structured weather, activity, profile, and recommendation
-          facts. It should explain the outfit decision, not create a new one.
+          AI classifies an English follow-up into a strict schema. ShortsAI rules
+          recalculate warmer, lighter, or item-avoidance requests and generate the
+          displayed explanation. AI cannot remove safety-required items.
+        </p>
+        <h2>First-party learning data</h2>
+        <p>
+          Authenticated outcomes may be exported to the pseudonymous SWAOP dataset.
+          The export excludes email, exact location, location labels, raw AI questions,
+          guest data, and recommendations the user did not follow. Guest pending
+          feedback remains on the device and is not used for training.
         </p>
         <h2>Rate limiting</h2>
         <p>

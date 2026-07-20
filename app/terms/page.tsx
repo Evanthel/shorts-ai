@@ -21,13 +21,14 @@ export default function TermsPage() {
         </p>
         <h2>Account features</h2>
         <p>
-          Magic-link sign-in lets the app save profile memory, feedback,
-          favourite locations, and recent recommendation history.
+          Magic-link sign-in lets the app save profile memory, candidate exposure,
+          acceptance, post-activity feedback, favourite locations, and recent history.
         </p>
         <h2>AI usage</h2>
         <p>
-          AI explanations are limited and may fall back to deterministic text
-          when the service is unavailable or usage limits are reached.
+          AI intent classification is limited and may fall back to deterministic text
+          when the service is unavailable or usage limits are reached. The permanent
+          ShortsAI safety policy remains in control of every recalculated outfit.
         </p>
       </section>
     </main>

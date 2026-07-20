@@ -1,71 +1,72 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import type { ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
 import { AuthPanel } from "@/features/auth/auth-panel";
+import { requestExplanation } from "@/features/recommendation/explanation";
+import { requestRecommendation } from "@/features/recommendation/api";
 import {
-  createOutOfScopeExplanation,
-  isFollowUpInScope,
-  requestExplanation,
-} from "@/features/recommendation/explanation";
-import {
-  deleteFavouriteLocation,
+  acceptRecommendation,
   loadFeedbackStats,
-  loadFavouriteLocations,
+  loadPendingFeedback,
   loadProfileMemory,
   loadRecommendationHistory,
   resetProfileMemory,
   saveFeedback,
-  saveFavouriteLocation,
   saveProfileMemory,
-  saveRecommendation,
+  saveRecommendationExposure,
+  selectRecommendationVariant,
 } from "@/features/recommendation/persistence";
-import type {
-  FeedbackStats,
-  FavouriteLocation,
-  RecommendationHistoryItem,
-} from "@/features/recommendation/persistence";
+import type { FeedbackStats, RecommendationHistoryItem } from "@/features/recommendation/persistence";
 import {
-  buildComfortSummary,
   buildRecommendationInput,
   createInitialPlannerForm,
-  createRecommendation,
+  createRecommendationResult,
   emptyFeedbackStats,
   fetchLocationForecast,
   formatLocationLabel,
-  getFeedbackChangeNote,
-  getFeedbackTemperatureDelta,
-  getProfileLearningCopy,
-  getRecommendationQualitySummary,
+  getContextTemperatureOffset,
   projectFeedbackStats,
   searchLocations,
-  shiftPlannerStartTime,
+  shortcutQuestions,
   starterProfiles,
+  updateComfortMemory,
   updatePlannerDuration,
 } from "@shorts-ai/core";
 import { publishWeatherPreviewForecast } from "@/features/weather/preview-events";
 import type {
+  ActivityInput,
   ActivityMode,
+  ActuallyWorn,
   ClothingItem,
+  ComfortMemory,
+  CommuteMode,
+  FeedbackAdjustment,
+  FeedbackProblemArea,
+  FeedbackRating,
+  FollowUpIntent,
   GeoLocation,
   LocationForecast,
   PlannerForm,
+  RecommendationResult,
   RunningIntensity,
   StarterProfile,
-  WeatherSnapshot,
 } from "@shorts-ai/core";
 
 const clothingLabels: Record<ClothingItem, string> = {
-  shorts: "Shorts",
-  long_pants: "Long pants",
-  t_shirt: "T-shirt",
-  long_sleeve: "Long sleeve",
-  hoodie: "Hoodie",
-  light_jacket: "Light jacket",
-  rain_jacket: "Rain jacket",
-  gloves: "Gloves",
-  hat: "Hat",
+  shorts: "Shorts", long_pants: "Long pants", t_shirt: "T-shirt",
+  long_sleeve: "Long sleeve", hoodie: "Hoodie", light_jacket: "Light jacket",
+  rain_jacket: "Rain jacket", gloves: "Gloves", hat: "Hat",
+};
+
+type PendingFeedbackItem = {
+  id: string;
+  recommendationId: string | null;
+  clientRequestId: string;
+  dueAt: string;
+  activity: ActivityInput;
+  locationLabel: string;
 };
 
 export function RunningDemo() {
@@ -74,909 +75,423 @@ export function RunningDemo() {
   const [locationResults, setLocationResults] = useState<GeoLocation[]>([]);
   const [forecast, setForecast] = useState<LocationForecast | null>(null);
   const [weatherStatus, setWeatherStatus] = useState("Loading Warsaw forecast...");
-  const [ratedRecommendations, setRatedRecommendations] = useState(3);
-  const [temperatureOffsetC, setTemperatureOffsetC] = useState(0);
   const [user, setUser] = useState<User | null>(null);
-  const [lastRecommendationId, setLastRecommendationId] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState("Sign in to save your profile.");
-  const [profileStatus, setProfileStatus] = useState("Using starter profile.");
-  const [favouriteStatus, setFavouriteStatus] = useState("");
-  const [favouriteLocations, setFavouriteLocations] = useState<FavouriteLocation[]>([]);
-  const [defaultFavouriteId, setDefaultFavouriteId] = useState<string | null>(null);
-  const [recommendationHistory, setRecommendationHistory] = useState<RecommendationHistoryItem[]>([]);
-  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+  const [ratedRecommendations, setRatedRecommendations] = useState(0);
+  const [temperatureOffsetC, setTemperatureOffsetC] = useState(0);
+  const [comfortMemory, setComfortMemory] = useState<ComfortMemory>({});
   const [feedbackStats, setFeedbackStats] = useState<FeedbackStats>(() => emptyFeedbackStats());
+  const [history, setHistory] = useState<RecommendationHistoryItem[]>([]);
+  const [result, setResult] = useState<RecommendationResult | null>(null);
+  const [clientRequestId, setClientRequestId] = useState<string | null>(null);
+  const [recommendationStatus, setRecommendationStatus] = useState("Waiting for forecast data.");
+  const [pendingFeedback, setPendingFeedback] = useState<PendingFeedbackItem[]>([]);
+  const [activePendingId, setActivePendingId] = useState<string | null>(null);
+  const [activeFeedbackDue, setActiveFeedbackDue] = useState(false);
+  const [feedbackRating, setFeedbackRating] = useState<FeedbackRating | null>(null);
+  const [actuallyWorn, setActuallyWorn] = useState<ActuallyWorn | null>(null);
+  const [adjustment, setAdjustment] = useState<FeedbackAdjustment>("none");
+  const [problemArea, setProblemArea] = useState<FeedbackProblemArea | null>(null);
+  const [feedbackStatus, setFeedbackStatus] = useState("");
   const [explanation, setExplanation] = useState("");
-  const [explanationTone, setExplanationTone] = useState<"neutral" | "success" | "warning">("neutral");
   const [followUpQuestion, setFollowUpQuestion] = useState("");
-  const [explanationStatus, setExplanationStatus] = useState(
-    "Generate an explanation after the recommendation is ready.",
-  );
-  const [profileChangeNote, setProfileChangeNote] = useState(
-    "Rate the recommendation to teach the profile how warm or light you prefer the outfit.",
-  );
+  const [explanationStatus, setExplanationStatus] = useState("Choose a shortcut or ask a question.");
+  const [rejectedRequiredItems, setRejectedRequiredItems] = useState<ClothingItem[]>([]);
   const [isPending, startTransition] = useTransition();
 
-  const recommendationInput = forecast
-    ? buildRecommendationInput(form, forecast, ratedRecommendations, temperatureOffsetC)
-    : null;
-  const recommendation = recommendationInput
-    ? createRecommendation(recommendationInput)
-    : null;
-  const running = recommendation?.running;
-  const readiness = Math.min(100, Math.round((ratedRecommendations / 15) * 100));
-  const isPersonalized = readiness >= 100;
-  const shouldShowStarterProfile = !user || !isPersonalized;
-  const shouldShowLocationResults = locationQuery.trim().length >= 2 && locationResults.length > 0;
-  const currentLocation = forecast?.location ?? null;
-  const currentLocationLabel = currentLocation ? formatLocationLabel(currentLocation) : "";
-  const isCurrentLocationSaved =
-    currentLocationLabel.length > 0 &&
-    favouriteLocations.some((location) => formatLocationLabel(location) === currentLocationLabel);
-  const profileLearningCopy = getProfileLearningCopy(
-    ratedRecommendations,
-    temperatureOffsetC,
-    profileStatus,
-    feedbackStats,
-  );
-  const qualitySummary = getRecommendationQualitySummary(
-    feedbackStats,
-    temperatureOffsetC,
-    ratedRecommendations,
-  );
-  const isSaveWarning =
-    saveStatus.startsWith("Sign in") ||
-    saveStatus.startsWith("Could not") ||
-    saveStatus.includes("keep it");
+  const recommendationInput = useMemo(() => forecast
+    ? buildRecommendationInput(form, forecast, ratedRecommendations, temperatureOffsetC, comfortMemory)
+    : null, [form, forecast, ratedRecommendations, temperatureOffsetC, comfortMemory]);
+  const recommendation = result?.recommendation ?? null;
+  const selectedVariant = result?.variants.find((variant) => variant.id === result.selectedVariantId) ?? null;
+  const activePending = pendingFeedback.find((item) => item.id === activePendingId) ?? null;
+  const contextualFollowUpNeeded = feedbackRating !== "good" || actuallyWorn === "with_changes" || actuallyWorn === "no";
+
+  useEffect(() => {
+    let ignore = false;
+    void (async () => {
+      try {
+        const locations = await searchLocations("Warsaw");
+        if (!locations[0] || ignore) return;
+        const nextForecast = await fetchLocationForecast(locations[0]);
+        if (ignore) return;
+        setForecast(nextForecast);
+        publishWeatherPreviewForecast(nextForecast);
+        setWeatherStatus(`Using live forecast for ${formatLocationLabel(locations[0])}.`);
+      } catch { if (!ignore) setWeatherStatus("Could not load the initial forecast."); }
+    })();
+    return () => { ignore = true; };
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    void (async () => {
+      if (!user) {
+        setHistory([]);
+        setFeedbackStats(emptyFeedbackStats());
+        setPendingFeedback(loadGuestPendingFeedback());
+        return;
+      }
+      try {
+        const [memory, nextHistory, stats, databasePending] = await Promise.all([
+          loadProfileMemory(user), loadRecommendationHistory(user), loadFeedbackStats(user), loadPendingFeedback(user),
+        ]);
+        if (ignore) return;
+        if (memory) {
+          setRatedRecommendations(memory.ratedRecommendations);
+          setTemperatureOffsetC(memory.temperatureOffsetC);
+          setComfortMemory(memory.comfortMemory);
+          setForm((current) => ({ ...current, starterProfile: memory.starterProfile }));
+        }
+        setHistory(nextHistory);
+        setFeedbackStats(stats);
+        setPendingFeedback(databasePending.map((item) => {
+          const payload = asRecord(item.recommendation);
+          const activity = asRecord(payload.activity) as ActivityInput;
+          return {
+            id: item.id,
+            recommendationId: item.id,
+            clientRequestId: item.id,
+            dueAt: item.feedbackDueAt ?? new Date().toISOString(),
+            activity,
+            locationLabel: item.locationLabel,
+          };
+        }).filter((item) => Boolean(item.activity?.mode)));
+      } catch { if (!ignore) setFeedbackStatus("Could not load profile history."); }
+    })();
+    return () => { ignore = true; };
+  }, [user]);
+
+  useEffect(() => {
+    if (!recommendationInput) return;
+    let ignore = false;
+    const requestId = crypto.randomUUID();
+    void (async () => {
+      await Promise.resolve();
+      if (ignore) return;
+      setClientRequestId(requestId);
+      setRecommendationStatus("Checking safe outfit variants...");
+      setExplanation("");
+      setResult(createRecommendationResult(recommendationInput));
+      setRejectedRequiredItems([]);
+      const next = await requestRecommendation({ clientRequestId: requestId, input: recommendationInput });
+      if (ignore) return;
+      let recommendationId = next.recommendationId ?? null;
+      if (user && !recommendationId) {
+        recommendationId = await saveRecommendationExposure(user, requestId, recommendationInput, next);
+      }
+      if (ignore) return;
+      setResult({ ...next, ...(recommendationId ? { recommendationId } : {}) });
+      setRecommendationStatus(next.source === "model" ? `Ranked by ${next.modelVersion}.` : "Safe variants ranked by ShortsAI rules.");
+    })().catch(() => { if (!ignore) setRecommendationStatus("Using offline ShortsAI rules."); });
+    return () => { ignore = true; };
+  }, [recommendationInput, user]);
 
   function updateForm<Key extends keyof PlannerForm>(key: Key, value: PlannerForm[Key]) {
-    resetExplanation();
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  function resetExplanation() {
-    setExplanation("");
-    setExplanationTone("neutral");
-    setExplanationStatus("Generate an explanation after the recommendation is ready.");
-  }
-
-  function runSearch() {
-    if (locationQuery.trim().length < 2) {
-      setLocationResults([]);
-      setWeatherStatus("Type at least two characters to search.");
-      return;
-    }
-
+  function searchForLocation() {
+    if (locationQuery.trim().length < 2) return;
     startTransition(async () => {
-      setWeatherStatus("Searching locations...");
-
       try {
-        const results = await searchLocations(locationQuery);
-        setLocationResults(results);
-        setWeatherStatus(results.length > 0 ? "Choose a matching location." : "No locations found.");
-      } catch {
-        setWeatherStatus("Location search failed.");
-      }
+        setWeatherStatus("Searching locations...");
+        const matches = await searchLocations(locationQuery);
+        setLocationResults(matches);
+        setWeatherStatus(matches.length ? "Choose a matching location." : "No locations found.");
+      } catch { setWeatherStatus("Location search failed."); }
     });
   }
 
   function chooseLocation(location: GeoLocation) {
     startTransition(async () => {
-      resetExplanation();
-      await selectLocation(location, false);
-      setLocationQuery(formatLocationLabel(location));
-      setLocationResults([]);
+      try {
+        setWeatherStatus(`Loading forecast for ${formatLocationLabel(location)}...`);
+        const next = await fetchLocationForecast(location);
+        setForecast(next);
+        publishWeatherPreviewForecast(next);
+        setLocationQuery(formatLocationLabel(location));
+        setLocationResults([]);
+        setWeatherStatus(`Using live forecast for ${formatLocationLabel(location)}.`);
+      } catch { setWeatherStatus("Weather forecast failed."); }
     });
   }
 
-  async function selectLocation(location: GeoLocation, ignore: boolean) {
-    setWeatherStatus(`Loading forecast for ${formatLocationLabel(location)}...`);
-
-    try {
-      const nextForecast = await fetchLocationForecast(location);
-
-      if (ignore) {
-        return;
-      }
-
-      setForecast(nextForecast);
-      publishWeatherPreviewForecast(nextForecast);
-      setWeatherStatus(`Using live forecast for ${formatLocationLabel(location)}.`);
-    } catch {
-      if (!ignore) {
-        setWeatherStatus("Weather forecast failed.");
-      }
-    }
+  function chooseVariant(variantId: string) {
+    void selectRecommendationVariant(user, result?.recommendationId ?? null, variantId).catch(() => {
+      setRecommendationStatus("Variant selected locally; preference sync failed.");
+    });
+    setResult((current) => {
+      const variant = current?.variants.find((item) => item.id === variantId);
+      if (!current || !variant) return current;
+      return {
+        ...current,
+        selectedVariantId: variantId,
+        recommendation: { ...current.recommendation, outfit: variant.outfit, ...(variant.running ? { running: variant.running } : {}) },
+      };
+    });
   }
 
-  useEffect(() => {
-    let ignore = false;
-
-    async function loadInitialForecast() {
-      try {
-        const results = await searchLocations("Warsaw");
-
-        if (ignore) {
-          return;
-        }
-
-        if (results[0]) {
-          await selectLocation(results[0], ignore);
-        }
-      } catch {
-        if (!ignore) {
-          setWeatherStatus("Could not load the initial forecast.");
-        }
-      }
-    }
-
-    void loadInitialForecast();
-
-    return () => {
-      ignore = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let ignore = false;
-
-    async function syncProfileMemory() {
-      if (!user) {
-        setProfileStatus("Using starter profile.");
-        setSaveStatus("Sign in to save your profile.");
-        setFavouriteStatus("");
-        setFavouriteLocations([]);
-        setDefaultFavouriteId(null);
-        setRecommendationHistory([]);
-        setFeedbackStats(emptyFeedbackStats());
-        return;
-      }
-
-      try {
-        setProfileStatus("Loading profile...");
-        const [memory, history, favourites, stats] = await Promise.all([
-          loadProfileMemory(user),
-          loadRecommendationHistory(user),
-          loadFavouriteLocations(user),
-          loadFeedbackStats(user),
-        ]);
-
-        if (ignore) {
-          return;
-        }
-
-        setRecommendationHistory(history);
-        setFavouriteLocations(favourites);
-        setFeedbackStats(stats);
-        const storedDefaultId = getStoredDefaultFavouriteId(user.id);
-        const defaultLocation = favourites.find((location) => location.favouriteId === storedDefaultId);
-
-        if (defaultLocation) {
-          setDefaultFavouriteId(defaultLocation.favouriteId);
-          setLocationQuery(formatLocationLabel(defaultLocation));
-          await selectLocation(defaultLocation, ignore);
-        } else {
-          setDefaultFavouriteId(null);
-        }
-
-        if (!memory) {
-          setProfileStatus("No saved profile yet.");
-          return;
-        }
-
-        setRatedRecommendations(memory.ratedRecommendations);
-        setTemperatureOffsetC(memory.temperatureOffsetC);
-        setForm((current) => ({
-          ...current,
-          starterProfile: memory.starterProfile,
-        }));
-        setProfileStatus(memory.comfortSummary ?? "Loaded saved profile.");
-      } catch {
-        if (!ignore) {
-          setProfileStatus("Could not load profile.");
-        }
-      }
-    }
-
-    void syncProfileMemory();
-
-    return () => {
-      ignore = true;
-    };
-  }, [user]);
-
-  async function persistCurrentRecommendation() {
-    if (!user) {
-      setSaveStatus("Sign in to save recommendation history.");
-      return null;
-    }
-
+  async function confirmOutfit() {
+    if (!result || !recommendationInput || !clientRequestId) return;
     try {
-      setSaveStatus("Saving recommendation...");
-      const recommendationId = await saveRecommendation(user, recommendationInput, recommendation);
-      setLastRecommendationId(recommendationId);
-      setSaveStatus("Recommendation saved.");
-      setRecommendationHistory(await loadRecommendationHistory(user));
-      return recommendationId;
-    } catch {
-      setSaveStatus("Could not save recommendation.");
-      return null;
-    }
+      const dueAt = await acceptRecommendation(user, result.recommendationId ?? null, result.selectedVariantId, recommendationInput.activity.returnHomeTime);
+      const pending: PendingFeedbackItem = {
+        id: result.recommendationId ?? clientRequestId,
+        recommendationId: result.recommendationId ?? null,
+        clientRequestId,
+        dueAt,
+        activity: recommendationInput.activity,
+        locationLabel: recommendationInput.current.locationLabel,
+      };
+      setPendingFeedback((current) => [pending, ...current.filter((item) => item.id !== pending.id)]);
+      if (!user) saveGuestPendingFeedback(pending);
+      setRecommendationStatus(rejectedRequiredItems.length
+        ? `Outfit accepted with an active safety warning for ${rejectedRequiredItems.map((item) => clothingLabels[item]).join(", ")}. Feedback is due ${formatDate(dueAt)}.`
+        : `Outfit accepted. Feedback is due ${formatDate(dueAt)}.`);
+      if (user) setHistory(await loadRecommendationHistory(user));
+    } catch { setRecommendationStatus("Could not accept this outfit."); }
   }
 
-  async function applyFeedback(feedback: "good" | "too_cold" | "too_warm") {
-    const nextRatedRecommendations = ratedRecommendations + 1;
-    const nextTemperatureOffsetC =
-      temperatureOffsetC + getFeedbackTemperatureDelta(feedback);
-
-    setRatedRecommendations(nextRatedRecommendations);
-    setTemperatureOffsetC(nextTemperatureOffsetC);
-    setFeedbackStats((current) => projectFeedbackStats(current, feedback));
-    setProfileChangeNote(getFeedbackChangeNote(feedback, nextTemperatureOffsetC));
-
-    if (!user) {
-      setSaveStatus("Feedback adjusted this session. Sign in to keep it.");
-      setProfileStatus("Session profile updated.");
-      return;
-    }
-
+  async function ask(intent?: FollowUpIntent) {
+    if (!recommendationInput || !recommendation || !result) return;
+    const question = followUpQuestion.trim();
+    if (!intent && question.length < 3) return;
     try {
-      const recommendationId =
-        lastRecommendationId ?? (await saveRecommendation(user, recommendationInput, recommendation));
-
-      setLastRecommendationId(recommendationId);
-
-      if (recommendationId) {
-        await saveFeedback(user, recommendationId, feedback);
-      }
-
-      const nextFeedbackStats = await loadFeedbackStats(user);
-      await saveProfileMemory(user, {
-        starterProfile: form.starterProfile,
-        ratedRecommendations: nextRatedRecommendations,
-        temperatureOffsetC: nextTemperatureOffsetC,
-        comfortSummary: buildComfortSummary(
-          nextFeedbackStats,
-          nextTemperatureOffsetC,
-          nextRatedRecommendations,
-        ),
+      setExplanationStatus(intent ? "Explaining this plan..." : "Classifying your question...");
+      const response = await requestExplanation({
+        input: recommendationInput,
+        recommendation,
+        recommendationResult: result,
+        recommendationId: result.recommendationId,
+        source: intent ? "shortcut" : "text",
+        ...(intent ? { intent } : { question }),
       });
-
-      setSaveStatus("Feedback saved to your profile.");
-      setProfileStatus("Profile updated.");
-      setFeedbackStats(nextFeedbackStats);
-      setRecommendationHistory(await loadRecommendationHistory(user));
-    } catch {
-      setSaveStatus("Could not save feedback.");
-    }
-  }
-
-  async function saveCurrentLocationAsFavourite() {
-    if (!user) {
-      setFavouriteStatus("Sign in to save favourite locations.");
-      return;
-    }
-
-    if (!currentLocation) {
-      setFavouriteStatus("Choose a location first.");
-      return;
-    }
-
-    if (isCurrentLocationSaved) {
-      setFavouriteStatus("This location is already saved.");
-      return;
-    }
-
-    try {
-      setFavouriteStatus("Saving location...");
-      await saveFavouriteLocation(user, currentLocation);
-      setFavouriteLocations(await loadFavouriteLocations(user));
-      setFavouriteStatus("Location saved.");
-    } catch {
-      setFavouriteStatus("Could not save location.");
-    }
-  }
-
-  async function deleteFavourite(location: FavouriteLocation) {
-    if (!user) {
-      return;
-    }
-
-    try {
-      setFavouriteStatus("Removing location...");
-      await deleteFavouriteLocation(user, location.favouriteId);
-
-      if (defaultFavouriteId === location.favouriteId) {
-        clearStoredDefaultFavouriteId(user.id);
-        setDefaultFavouriteId(null);
+      setExplanation(response.explanation);
+      setFollowUpQuestion("");
+      setExplanationStatus(response.scope === "out_of_scope" ? "That question is outside this recommendation." : "Explanation ready.");
+      if (response.recommendationResult) {
+        setResult({ ...response.recommendationResult, recommendationId: result.recommendationId });
       }
-
-      setFavouriteLocations(await loadFavouriteLocations(user));
-      setFavouriteStatus("Location removed.");
-    } catch {
-      setFavouriteStatus("Could not remove location.");
-    }
+    } catch { setExplanationStatus("Could not explain this recommendation."); }
   }
 
-  function setDefaultFavourite(location: FavouriteLocation) {
-    if (!user) {
-      return;
-    }
-
-    setStoredDefaultFavouriteId(user.id, location.favouriteId);
-    setDefaultFavouriteId(location.favouriteId);
-    setFavouriteStatus("Default location set on this device.");
+  async function submitPostActivityFeedback() {
+    if (!activePending || !activeFeedbackDue || !feedbackRating || !actuallyWorn) return;
+    const finalAdjustment: FeedbackAdjustment = actuallyWorn === "no"
+      ? "did_not_follow"
+      : actuallyWorn === "with_changes" && adjustment === "none" ? "added_layer" : adjustment;
+    try {
+      await saveFeedback(user, activePending.recommendationId, {
+        rating: feedbackRating,
+        actuallyWorn,
+        adjustment: finalAdjustment,
+        problemAreas: problemArea ? [problemArea] : [],
+        source: "web",
+      });
+      let nextMemory = comfortMemory;
+      let nextRated = ratedRecommendations;
+      if (actuallyWorn !== "no" && finalAdjustment !== "did_not_follow") {
+        nextMemory = updateComfortMemory(comfortMemory, activePending.activity, feedbackRating);
+        nextRated += 1;
+        setComfortMemory(nextMemory);
+        setRatedRecommendations(nextRated);
+        setFeedbackStats((current) => projectFeedbackStats(current, feedbackRating));
+      }
+      if (user) {
+        await saveProfileMemory(user, {
+          starterProfile: form.starterProfile,
+          ratedRecommendations: nextRated,
+          temperatureOffsetC,
+          comfortMemory: nextMemory,
+        });
+        setFeedbackStats(await loadFeedbackStats(user));
+      } else removeGuestPendingFeedback(activePending.clientRequestId);
+      setPendingFeedback((current) => current.filter((item) => item.id !== activePending.id));
+      setActivePendingId(null);
+      setFeedbackRating(null);
+      setActuallyWorn(null);
+      setAdjustment("none");
+      setProblemArea(null);
+      setFeedbackStatus("Post-activity feedback saved.");
+    } catch { setFeedbackStatus("Could not save feedback."); }
   }
 
   async function resetProfile() {
-    if (!user) {
-      setSaveStatus("Sign in to reset profile memory.");
-      return;
-    }
-
-    try {
-      setProfileStatus("Resetting profile...");
-      await resetProfileMemory(user, form.starterProfile);
-      setRatedRecommendations(0);
-      setTemperatureOffsetC(0);
-      setFeedbackStats(emptyFeedbackStats());
-      setProfileStatus("Profile reset.");
-      setSaveStatus("Profile memory reset.");
-      setProfileChangeNote("Profile memory is fresh. New feedback will rebuild your comfort pattern.");
-    } catch {
-      setProfileStatus("Could not reset profile.");
-    }
-  }
-
-  function repeatHistoryTiming(item: RecommendationHistoryItem) {
-    if (!item.createdAtInput && !item.returnHomeTime) {
-      setSaveStatus("This saved plan does not include repeatable timing yet.");
-      return;
-    }
-
-    setForm((current) => ({
-      ...current,
-      mode: item.activityMode,
-      startTime: item.createdAtInput ?? current.startTime,
-      returnHomeTime: item.returnHomeTime ?? current.returnHomeTime,
-    }));
-    setSaveStatus("Plan timing restored. Choose location if needed.");
-  }
-
-  async function generateExplanation(question?: string) {
-    if (!recommendationInput || !recommendation) {
-      setExplanationTone("warning");
-      setExplanationStatus("Choose a location first.");
-      return;
-    }
-
-    if (!isFollowUpInScope(question)) {
-      setExplanation(createOutOfScopeExplanation());
-      setExplanationTone("warning");
-      setExplanationStatus("Question outside ShortsAI scope.");
-      return;
-    }
-
-    try {
-      setExplanationTone("neutral");
-      setExplanationStatus("Generating explanation...");
-      const result = await requestExplanation({
-        input: recommendationInput,
-        recommendation,
-        question,
-      });
-
-      setExplanation(result.explanation);
-      setFollowUpQuestion("");
-      setExplanationTone(result.scope === "out_of_scope" ? "warning" : "success");
-      setExplanationStatus(
-        result.scope === "out_of_scope"
-          ? "Question outside ShortsAI scope."
-          : result.limit?.exceeded
-          ? "AI limit reached. Using deterministic fallback explanation."
-          : result.source === "openrouter"
-          ? "Explanation generated by OpenRouter."
-          : "Using deterministic fallback explanation.",
-      );
-    } catch {
-      setExplanationTone("warning");
-      setExplanationStatus("Could not generate explanation.");
-    }
-  }
-
-  function updateStartTime(nextStartTime: string) {
-    setForm((current) => shiftPlannerStartTime(current, nextStartTime));
-    resetExplanation();
-  }
-
-  function updateDuration(nextDuration: number) {
-    setForm((current) => updatePlannerDuration(current, nextDuration));
-    resetExplanation();
+    await resetProfileMemory(user, form.starterProfile);
+    setComfortMemory({});
+    setTemperatureOffsetC(0);
+    setRatedRecommendations(0);
+    setFeedbackStats(emptyFeedbackStats());
+    setFeedbackStatus("Comfort memory reset.");
   }
 
   return (
     <section id="run-planner" className="demo-shell">
       <div className="demo-heading">
-        <h2>The planner becomes the product.</h2>
-        <p>
-          Search a city, set the activity window, and ShortsAI turns forecast
-          timing into an outfit for the plan and the way home.
-        </p>
+        <h2>Plan the activity, then choose your comfort level.</h2>
+        <p>ShortsAI creates safe lighter, standard, and warmer options for the full weather window.</p>
       </div>
-
       <div className="demo-workspace">
-        <form className="demo-form" aria-label="Running recommendation controls">
+        <form className="demo-form" aria-label="Outfit recommendation controls">
           <div className="field field-wide">
             <label htmlFor="locationSearch">Search location</label>
             <div className="search-row">
-              <input
-                id="locationSearch"
-                type="search"
-                value={locationQuery}
-                onChange={(event) => {
-                  setLocationQuery(event.target.value);
-
-                  if (event.target.value.trim().length === 0) {
-                    setLocationResults([]);
-                  }
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    runSearch();
-                  }
-                }}
-              />
-              <button type="button" onClick={runSearch} disabled={isPending}>
-                Search
-              </button>
+              <input id="locationSearch" type="search" value={locationQuery} onChange={(event) => setLocationQuery(event.target.value)} />
+              <button type="button" onClick={searchForLocation} disabled={isPending}>Search</button>
             </div>
           </div>
-
-          <p className="forecast-status field-wide" aria-live="polite">
-            {weatherStatus}
-          </p>
-
-          {shouldShowLocationResults ? (
-            <div className="location-results field-wide">
-              <div>
-                {locationResults.map((location) => (
-                  <button
-                    key={location.id}
-                    type="button"
-                    onClick={() => chooseLocation(location)}
-                  >
-                    {formatLocationLabel(location)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {user ? (
-            <div className="location-tools field-wide">
-              <div className="location-tool-row">
-                <button
-                  type="button"
-                  onClick={saveCurrentLocationAsFavourite}
-                  disabled={!currentLocation || isCurrentLocationSaved}
-                >
-                  {isCurrentLocationSaved ? "Saved" : "Save location"}
-                </button>
-                {favouriteStatus ? <p>{favouriteStatus}</p> : null}
-              </div>
-              {favouriteLocations.length > 0 ? (
-                <details className="favourite-details">
-                  <summary>Saved locations ({favouriteLocations.length})</summary>
-                  <div className="favourite-list" aria-label="Favourite locations">
-                    {favouriteLocations.map((location) => (
-                      <article key={location.favouriteId}>
-                        <button type="button" onClick={() => chooseLocation(location)}>
-                          {formatLocationLabel(location)}
-                        </button>
-                        <div>
-                          <button type="button" onClick={() => setDefaultFavourite(location)}>
-                            {defaultFavouriteId === location.favouriteId ? "Default" : "Set default"}
-                          </button>
-                          <button type="button" onClick={() => deleteFavourite(location)}>
-                            Delete
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </details>
-              ) : null}
-            </div>
-          ) : null}
-
-          <div className="field">
-            <label htmlFor="activityMode">Activity</label>
-            <select
-              id="activityMode"
-              value={form.mode}
-              onChange={(event) =>
-                updateForm("mode", event.target.value as ActivityMode)
-              }
-            >
-              <option value="running">Running</option>
-              <option value="walking">Walking</option>
-              <option value="everyday">Everyday / commute</option>
+          <p className="forecast-status field-wide" aria-live="polite">{weatherStatus}</p>
+          {locationResults.length > 0 ? <div className="location-results field-wide"><div>{locationResults.map((location) => (
+            <button key={location.id} type="button" onClick={() => chooseLocation(location)}>{formatLocationLabel(location)}</button>
+          ))}</div></div> : null}
+          <Field label="Activity" id="activityMode">
+            <select id="activityMode" value={form.mode} onChange={(event) => updateForm("mode", event.target.value as ActivityMode)}>
+              <option value="running">Run</option><option value="walking">Walk</option><option value="commute">Commute</option>
             </select>
-          </div>
-
-          {shouldShowStarterProfile ? (
-            <div className="field">
-              <label htmlFor="profile">Starter profile</label>
-              <select
-                id="profile"
-                value={form.starterProfile}
-                onChange={(event) =>
-                  updateForm("starterProfile", event.target.value as StarterProfile)
-                }
-              >
-                {Object.values(starterProfiles).map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.label}
-                  </option>
-                ))}
+          </Field>
+          <Field label="Starter profile" id="profile">
+            <select id="profile" value={form.starterProfile} onChange={(event) => updateForm("starterProfile", event.target.value as StarterProfile)}>
+              {Object.values(starterProfiles).map((profile) => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
+            </select>
+          </Field>
+          {form.mode === "running" ? <Field label="Intensity" id="intensity">
+            <select id="intensity" value={form.intensity} onChange={(event) => updateForm("intensity", event.target.value as RunningIntensity)}>
+              <option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option>
+            </select>
+          </Field> : null}
+          {form.mode === "commute" ? <>
+            <Field label="Commute mode" id="commuteMode">
+              <select id="commuteMode" value={form.commuteMode} onChange={(event) => updateForm("commuteMode", event.target.value as CommuteMode)}>
+                <option value="walking">Walking</option><option value="transit">Transit</option><option value="bicycle">Bicycle</option><option value="car">Car</option>
               </select>
-            </div>
-          ) : null}
-
-          {form.mode === "running" ? (
-            <div className="field">
-              <label htmlFor="intensity">Intensity</label>
-              <select
-                id="intensity"
-                value={form.intensity}
-                onChange={(event) =>
-                  updateForm("intensity", event.target.value as RunningIntensity)
-                }
-              >
-                <option value="easy">Easy</option>
-                <option value="medium">Medium</option>
-                <option value="hard">Hard</option>
-              </select>
-            </div>
-          ) : null}
-
-          <div className="field">
-            <label htmlFor="startTime">Start time</label>
-            <input
-              id="startTime"
-              type="datetime-local"
-              value={form.startTime}
-              onChange={(event) => updateStartTime(event.target.value)}
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="duration">Duration</label>
-            <input
-              id="duration"
-              min="15"
-              max="120"
-              step="5"
-              type="number"
-              value={form.durationMinutes}
-              onChange={(event) =>
-                updateDuration(Number(event.target.value))
-              }
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="returnHomeTime">Return home</label>
-            <input
-              id="returnHomeTime"
-              type="datetime-local"
-              value={form.returnHomeTime}
-              onChange={(event) => updateForm("returnHomeTime", event.target.value)}
-            />
-          </div>
+            </Field>
+            <Field label="Outdoor exposure (minutes)" id="outdoorMinutes">
+              <input id="outdoorMinutes" type="number" min="0" max="1440" value={form.outdoorMinutes} onChange={(event) => updateForm("outdoorMinutes", Number(event.target.value))} />
+            </Field>
+            <label className="field"><span>Carry an extra layer</span><input type="checkbox" checked={form.canCarryLayer} onChange={(event) => updateForm("canCarryLayer", event.target.checked)} /></label>
+          </> : null}
+          <Field label="Start time" id="startTime"><input id="startTime" type="datetime-local" value={form.startTime} onChange={(event) => updateForm("startTime", event.target.value)} /></Field>
+          <Field label="Duration (minutes)" id="duration"><input id="duration" type="number" min="15" max="1440" step="5" value={form.durationMinutes} onChange={(event) => setForm((current) => updatePlannerDuration(current, Number(event.target.value)))} /></Field>
+          <Field label="Return home" id="returnHomeTime"><input id="returnHomeTime" type="datetime-local" value={form.returnHomeTime} onChange={(event) => updateForm("returnHomeTime", event.target.value)} /></Field>
         </form>
 
-        <article
-          className={
-            recommendationInput
-              ? `recommendation-panel ${getWeatherMoodClass(recommendationInput.current)}`
-              : "recommendation-panel"
-          }
-          aria-live="polite"
-        >
-          {recommendation && recommendationInput ? (
-            <>
-              <div className="panel-topline">
-                <span>{recommendationInput.current.locationLabel}</span>
-                <strong>{recommendation.confidenceScore}% confidence</strong>
-              </div>
-              <h3>{recommendation.headline}</h3>
-              <p className="activity-context">
-                {getActivityLabel(recommendationInput.activity.mode)} with{" "}
-                {starterProfiles[
-                  recommendationInput.personalization.starterProfile
-                ].label.toLowerCase()} profile.
-              </p>
-              <div className="weather-strip live-weather">
-                <span>
-                  Start {recommendationInput.current.temperatureC} C feels like{" "}
-                  {recommendationInput.current.feelsLikeC} C
-                </span>
-                <span>Wind {recommendationInput.current.windKph} km/h</span>
-                <span>
-                  Return feels like {recommendationInput.forecastAtReturn.feelsLikeC} C
-                </span>
-              </div>
-              <div className="profile-signal-list" aria-label="Profile scoring">
-                <h4>Profile scoring</h4>
-                <div>
-                  {recommendation.profileSignals.map((signal) => (
-                    <span key={signal.label} className={`signal-impact-${signal.impact}`}>
-                      <strong>{signal.label}</strong>
-                      {signal.value}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              {running ? (
-                <>
-                  <div className="phase-grid">
-                    <OutfitPhase title="Warm-up" items={running.warmUp} />
-                    <OutfitPhase title="Main run" items={running.mainRun} />
-                    <OutfitPhase title="Post-run" items={running.postRun} />
-                  </div>
-
-                  <div className="reminder-strip">
-                    <StatusPill active={running.carryExtraLayer}>
-                      Carry extra layer
-                    </StatusPill>
-                    <StatusPill active={running.hydrationReminder}>
-                      Hydration reminder
-                    </StatusPill>
-                    <StatusPill active={running.visibilityReminder}>
-                      Visibility reminder
-                    </StatusPill>
-                  </div>
-                </>
-              ) : (
-                <div className="phase-grid single-phase">
-                  <OutfitPhase title="Recommended outfit" items={recommendation.outfit} />
-                </div>
-              )}
-
-              <div className="risk-list">
-                <h4>Risk warnings</h4>
-                {recommendation.riskWarnings.length > 0 ? (
-                  recommendation.riskWarnings.map((warning) => (
-                    <p key={warning.type}>
-                      <strong>{warning.severity}</strong>
-                      {warning.message}
-                    </p>
-                  ))
-                ) : (
-                  <p>No major weather risks detected for this plan window.</p>
-                )}
-              </div>
-
-              <div className="explanation-panel">
-                <div>
-                  <h4>AI explanation</h4>
-                  <button type="button" onClick={() => generateExplanation()}>
-                    Generate explanation
-                  </button>
-                </div>
-                <p className={`explanation-message ${explanationTone}`}>
-                  {explanation || explanationStatus}
-                </p>
-                {explanation ? <small>{explanationStatus}</small> : null}
-                <div className="follow-up-row">
-                  <input
-                    type="text"
-                    value={followUpQuestion}
-                    onChange={(event) => setFollowUpQuestion(event.target.value)}
-                    placeholder="Ask: do I need a hoodie?"
-                    aria-label="Ask a follow-up question about this recommendation"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => generateExplanation(followUpQuestion.trim())}
-                    disabled={followUpQuestion.trim().length < 3}
-                  >
-                    Ask
-                  </button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="empty-recommendation">
-              <h3>Choose a location to generate a recommendation.</h3>
+        <article className="recommendation-panel" aria-live="polite">
+          {recommendation && recommendationInput && result ? <>
+            <div className="panel-topline"><span>{recommendationInput.current.locationLabel}</span><strong>{recommendation.confidenceScore}% confidence</strong></div>
+            <h3>{recommendation.headline}</h3>
+            <p className="activity-context">{activityLabel(form.mode)} · {result.engineVersion} · {result.source} · safety {result.safetyPolicyVersion}</p>
+            <div className="weather-strip live-weather">
+              <span>Start feels like {recommendationInput.current.feelsLikeC} C</span>
+              <span>Wind {recommendationInput.current.windKph} km/h</span>
+              <span>Return feels like {recommendationInput.forecastAtReturn.feelsLikeC} C</span>
             </div>
-          )}
+            <div className="feedback-actions" aria-label="Outfit variants">
+              {result.variants.map((variant) => <button key={variant.id} type="button" className={variant.id === result.selectedVariantId ? "active" : ""} onClick={() => chooseVariant(variant.id)}>
+                {variant.kind === "standard" ? "Standard" : variant.kind === "lighter" ? "Choose lighter" : "Choose warmer"}
+              </button>)}
+            </div>
+            {recommendation.running ? <div className="phase-grid">
+              <OutfitPhase title="Warm-up" items={recommendation.running.warmUp} />
+              <OutfitPhase title="Main run" items={recommendation.running.mainRun} />
+              <OutfitPhase title="Post-run" items={recommendation.running.postRun} />
+            </div> : <div className="phase-grid single-phase"><OutfitPhase title="Recommended outfit" items={selectedVariant?.outfit ?? recommendation.outfit} /></div>}
+            {selectedVariant?.requiredItems.length ? <div className="profile-change-note">
+              <p>Safety required: {selectedVariant.requiredItems.map((item) => clothingLabels[item]).join(", ")}.</p>
+              <div className="feedback-actions">{selectedVariant.requiredItems.map((item) => <button key={item} type="button" onClick={() => setRejectedRequiredItems((current) => current.includes(item) ? current.filter((value) => value !== item) : [...current, item])}>
+                {rejectedRequiredItems.includes(item) ? `Warning active: ${clothingLabels[item]}` : `I won't wear ${clothingLabels[item]}`}
+              </button>)}</div>
+              {rejectedRequiredItems.length ? <p>The rejected item remains recommended and its safety warning stays active.</p> : null}
+            </div> : null}
+            <div className="risk-list"><h4>Safety checks</h4>{recommendation.riskWarnings.length ? recommendation.riskWarnings.map((warning) => <p key={warning.type}><strong>{warning.severity}</strong>{warning.message}</p>) : <p>No major weather risks detected.</p>}</div>
+            <button className="save-button" type="button" onClick={confirmOutfit}>I&apos;ll wear this</button>
+            <p className="save-status">{recommendationStatus}</p>
+            <details className="explanation-panel">
+              <summary>Why this outfit? Ask ShortsAI</summary>
+              <div className="feedback-actions">{shortcutQuestions[form.mode].map((shortcut) => <button key={shortcut.intent} type="button" onClick={() => ask(shortcut.intent)}>{shortcut.label}</button>)}</div>
+              <p className="explanation-message">{explanation || explanationStatus}</p>
+              <div className="follow-up-row"><input value={followUpQuestion} onChange={(event) => setFollowUpQuestion(event.target.value)} maxLength={300} placeholder="Ask another question" aria-label="Ask another question" /><button type="button" onClick={() => ask()} disabled={followUpQuestion.trim().length < 3}>Ask</button></div>
+            </details>
+          </> : <div className="empty-recommendation"><h3>Choose a location to generate a recommendation.</h3></div>}
         </article>
 
         <div className="side-stack">
           <AuthPanel onUserChange={setUser} />
           <aside className="personalization-panel">
-            <p className="panel-label">Personalization</p>
-            {isPersonalized ? (
-              <h3>Profile ready.</h3>
-            ) : (
-              <>
-                <h3>{readiness}% ready</h3>
-                <div className="progress-track" aria-label="Personalization readiness">
-                  <span style={{ width: `${readiness}%` }} />
-                </div>
-              </>
-            )}
-            <p>
-              Stage:{" "}
-              {recommendation?.personalizationStage.replace("_", " ") ?? "starter profile"}.
-            </p>
-            <div className="feedback-actions">
-              <button type="button" onClick={() => applyFeedback("good")}>
-                Good
-              </button>
-              <button type="button" onClick={() => applyFeedback("too_cold")}>
-                Too cold
-              </button>
-              <button type="button" onClick={() => applyFeedback("too_warm")}>
-                Too warm
-              </button>
-            </div>
-            <p className="profile-change-note">{profileChangeNote}</p>
-            <button className="save-button" type="button" onClick={persistCurrentRecommendation}>
-              Save recommendation
-            </button>
-            <p className="profile-note">
-              {profileLearningCopy}
-            </p>
-            <div className="quality-panel" aria-label="Recommendation quality">
-              <div>
-                <span>Good rate</span>
-                <strong>{feedbackStats.total > 0 ? `${feedbackStats.goodRate}%` : "New"}</strong>
-              </div>
-              <div>
-                <span>Too cold</span>
-                <strong>{feedbackStats.tooCold}</strong>
-              </div>
-              <div>
-                <span>Too warm</span>
-                <strong>{feedbackStats.tooWarm}</strong>
-              </div>
-            </div>
-            <p className="quality-summary">{qualitySummary}</p>
-            {user ? (
-              <button className="reset-profile-button" type="button" onClick={resetProfile}>
-                Reset profile memory
-              </button>
-            ) : null}
-            <p className={isSaveWarning ? "save-status warning" : "save-status"}>
-              {saveStatus}
-            </p>
+            <p className="panel-label">Post-activity feedback</p>
+            <h3>{pendingFeedback.length ? "Rate your last outfit" : "No feedback due"}</h3>
+            {pendingFeedback.map((pending) => <button key={pending.id} type="button" onClick={() => {
+              setActivePendingId(pending.id);
+              setActiveFeedbackDue(new Date(pending.dueAt).getTime() <= Date.now());
+            }}>
+              {pending.locationLabel} · due {formatDate(pending.dueAt)}
+            </button>)}
+            {activePending ? <div className="feedback-flow">
+              {!activeFeedbackDue ? <p>Feedback opens after your return: {formatDate(activePending.dueAt)}.</p> : <>
+              <p>How did the outfit feel?</p>
+              <ChoiceRow values={["too_cold", "good", "too_warm"]} selected={feedbackRating} onSelect={(value) => setFeedbackRating(value as FeedbackRating)} />
+              <p>Did you wear the recommended outfit?</p>
+              <ChoiceRow values={["yes", "with_changes", "no"]} selected={actuallyWorn} onSelect={(value) => setActuallyWorn(value as ActuallyWorn)} />
+              {contextualFollowUpNeeded && feedbackRating && actuallyWorn ? <>
+                <label>What changed?<select value={adjustment} onChange={(event) => setAdjustment(event.target.value as FeedbackAdjustment)}>
+                  <option value="none">No clothing change</option><option value="added_layer">Added a layer</option><option value="removed_layer">Removed a layer</option><option value="changed_top">Changed the top</option><option value="changed_bottom">Changed the bottom</option>
+                </select></label>
+                <label>Main problem area<select value={problemArea ?? ""} onChange={(event) => setProblemArea((event.target.value || null) as FeedbackProblemArea | null)}>
+                  <option value="">Not specified</option><option value="upper">Upper body</option><option value="lower">Lower body</option><option value="hands_head">Hands or head</option><option value="start">At the start</option><option value="during">During activity</option><option value="return">On return</option>
+                </select></label>
+              </> : null}
+              <button type="button" onClick={submitPostActivityFeedback} disabled={!feedbackRating || !actuallyWorn}>Save feedback</button>
+              </>}
+            </div> : null}
+            <p>{feedbackStatus}</p>
+            <p>Current context offset: {recommendationInput ? getContextTemperatureOffset(recommendationInput.activity, comfortMemory, temperatureOffsetC) : 0} C. Good rate: {feedbackStats.total ? `${feedbackStats.goodRate}%` : "new"}.</p>
+            {user ? <button type="button" onClick={resetProfile}>Reset profile memory</button> : <p>Guest feedback stays on this device and is never used for training.</p>}
           </aside>
-          <aside className="history-panel">
-            <p className="panel-label">History</p>
-            <h3>Recent plans</h3>
-            {recommendationHistory.length > 0 ? (
-              <div className="history-list">
-                {recommendationHistory.map((item) => (
-                  <article key={item.id}>
-                    <span>{formatShortDate(item.createdAt)}</span>
-                    <strong>{item.locationLabel}</strong>
-                    <p>
-                      {getActivityLabel(item.activityMode)} | {item.confidenceScore}% |{" "}
-                      {item.headline}
-                    </p>
-                    {expandedHistoryId === item.id ? (
-                      <div className="history-detail">
-                        <p>Outfit: {item.outfitSummary}</p>
-                        {item.createdAtInput ? <p>Start: {formatShortDate(item.createdAtInput)}</p> : null}
-                        {item.returnHomeTime ? <p>Return: {formatShortDate(item.returnHomeTime)}</p> : null}
-                      </div>
-                    ) : null}
-                    <div className="history-actions">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setExpandedHistoryId(expandedHistoryId === item.id ? null : item.id)
-                        }
-                      >
-                        {expandedHistoryId === item.id ? "Hide details" : "Details"}
-                      </button>
-                      <button type="button" onClick={() => repeatHistoryTiming(item)}>
-                        Repeat timing
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <p className="history-empty">
-                Save recommendations to build a useful planning history.
-              </p>
-            )}
-          </aside>
+          <aside className="history-panel"><p className="panel-label">History</p><h3>Recent plans</h3>{history.length ? history.map((item) => <article key={item.id}><strong>{item.locationLabel}</strong><p>{activityLabel(item.activityMode)} · {item.headline}</p>{item.feedbackDueAt ? <span>Feedback due {formatDate(item.feedbackDueAt)}</span> : null}</article>) : <p>No authenticated history yet.</p>}</aside>
         </div>
       </div>
     </section>
   );
 }
 
+function Field({ label, id, children }: { label: string; id: string; children: ReactNode }) {
+  return <div className="field"><label htmlFor={id}>{label}</label>{children}</div>;
+}
+
 function OutfitPhase({ title, items }: { title: string; items: ClothingItem[] }) {
-  return (
-    <section className="phase">
-      <span>{title}</span>
-      <p>{items.map((item) => clothingLabels[item]).join(", ")}</p>
-    </section>
-  );
+  return <section className="phase"><span>{title}</span><p>{items.map((item) => clothingLabels[item]).join(", ")}</p></section>;
 }
 
-function StatusPill({
-  active,
-  children,
-}: {
-  active: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <span className={active ? "status-pill active" : "status-pill"}>{children}</span>
-  );
+function ChoiceRow({ values, selected, onSelect }: { values: string[]; selected: string | null; onSelect: (value: string) => void }) {
+  return <div className="feedback-actions">{values.map((value) => <button key={value} type="button" className={selected === value ? "active" : ""} onClick={() => onSelect(value)}>{value.replaceAll("_", " ")}</button>)}</div>;
 }
 
-function getActivityLabel(mode: ActivityMode) {
-  if (mode === "running") {
-    return "Run plan";
-  }
-
-  if (mode === "walking") {
-    return "Walking plan";
-  }
-
-  return "Everyday / commute plan";
+function activityLabel(mode: ActivityMode) {
+  return mode === "running" ? "Run" : mode === "walking" ? "Walk" : "Commute";
 }
 
-function formatShortDate(value: string) {
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
-function getWeatherMoodClass(weather: WeatherSnapshot) {
-  if (weather.rainProbabilityPercent >= 55) {
-    return "weather-rain";
-  }
+const GUEST_PENDING_KEY = "shortsai.pending-feedback.v2";
 
-  if (weather.windKph >= 25) {
-    return "weather-wind";
-  }
-
-  if (weather.temperatureC >= 24) {
-    return "weather-heat";
-  }
-
-  return "weather-calm";
+function loadGuestPendingFeedback(): PendingFeedbackItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(GUEST_PENDING_KEY) ?? "[]");
+    return Array.isArray(value) ? value as PendingFeedbackItem[] : [];
+  } catch { return []; }
 }
 
-function getDefaultFavouriteStorageKey(userId: string) {
-  return `shorts-ai-default-location:${userId}`;
+function saveGuestPendingFeedback(item: PendingFeedbackItem) {
+  const current = loadGuestPendingFeedback();
+  window.localStorage.setItem(GUEST_PENDING_KEY, JSON.stringify([item, ...current.filter((pending) => pending.id !== item.id)].slice(0, 20)));
 }
 
-function getStoredDefaultFavouriteId(userId: string) {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  return window.localStorage.getItem(getDefaultFavouriteStorageKey(userId));
+function removeGuestPendingFeedback(clientRequestId: string) {
+  window.localStorage.setItem(GUEST_PENDING_KEY, JSON.stringify(loadGuestPendingFeedback().filter((item) => item.clientRequestId !== clientRequestId)));
 }
 
-function setStoredDefaultFavouriteId(userId: string, favouriteId: string) {
-  window.localStorage.setItem(getDefaultFavouriteStorageKey(userId), favouriteId);
-}
-
-function clearStoredDefaultFavouriteId(userId: string) {
-  window.localStorage.removeItem(getDefaultFavouriteStorageKey(userId));
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }

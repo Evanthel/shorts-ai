@@ -12,37 +12,37 @@ const systemSignals = [
   {
     label: "Load",
     title: "Activity load",
-    body: "Running, walking, and everyday plans are treated differently, so body heat and duration do not distort every recommendation.",
-    meta: "Mode, intensity, duration, return time",
+    body: "Running, walking, and commute subtypes are treated differently, so body heat and outdoor exposure do not distort every recommendation.",
+    meta: "Mode, intensity, commute type, exposure, return time",
   },
   {
     label: "Memory",
     title: "Comfort memory",
-    body: "Feedback adjusts the next recommendation toward how the user actually feels outside.",
-    meta: "Starter profile, saved offset, feedback count",
+    body: "Post-activity feedback updates only the matching run, walk, or commute context.",
+    meta: "Context offset, actual wear, changes, problem areas",
   },
   {
     label: "Risk",
-    title: "Risk layer",
-    body: "The engine flags conditions that usually break outfit plans: colder returns, rain, wind, heat, and low visibility.",
-    meta: "Warnings before explanation",
+    title: "Safety policy",
+    body: "Cold, rain, wind, heat, and visibility are checked separately before any candidate is ranked.",
+    meta: "Required items stay in every safe variant",
   },
 ];
 
 const aiLayers = [
   {
-    title: "Rules lock the outfit first",
-    body: "The app chooses clothing from structured weather, activity, and profile inputs before any language model is called.",
-    tag: "Deterministic",
+    title: "Rules create safe choices first",
+    body: "The app creates lighter, standard, and warmer candidates, then applies required safety items before ranking.",
+    tag: "Safety-first",
   },
   {
-    title: "AI explains, not decides",
-    body: "OpenRouter receives the final recommendation and facts, then turns them into a short explanation without changing items.",
-    tag: "Guardrailed",
+    title: "AI classifies, rules recalculate",
+    body: "OpenRouter returns a structured intent only. ShortsAI handles any permitted adjustment and writes the explanation.",
+    tag: "Structured",
   },
   {
     title: "Fallback keeps it usable",
-    body: "If the AI key is missing or the request fails, the app still generates a plain explanation from the same facts.",
+    body: "If the API, model artifact, or language service fails, the same local safety rules still return a recommendation.",
     tag: "Resilient",
   },
 ];
@@ -55,7 +55,7 @@ export default function Home() {
           <a href="#" className="wordmark">
             ShortsAI
           </a>
-          <span className="nav-kicker">Weather intelligence for runners</span>
+          <span className="nav-kicker">Weather intelligence for active plans</span>
           <nav>
             <a href="#run-planner">Planner</a>
             <a href="#system-signals">Signals</a>
@@ -69,11 +69,11 @@ export default function Home() {
             <h2>Plan what to wear before the weather changes.</h2>
             <p className="hero-copy">
               Live forecast timing, activity load, and comfort memory become
-              one practical clothing call.
+              a few safe clothing choices.
             </p>
             <div className="hero-actions">
               <a href="#run-planner" className="button button-primary">
-                Plan a run
+                Plan an activity
               </a>
               <a href="#ai-angle" className="button button-secondary">
                 How AI helps
@@ -137,10 +137,10 @@ export default function Home() {
 
       <section id="ai-angle" className="content-section ai-section">
         <div className="ai-statement">
-          <h2>The model is useful because it has a narrow job.</h2>
+          <h2>Every model has a narrow job.</h2>
           <p>
-            Outfit decisions stay deterministic. AI only explains the result in
-            user language, with the activity mode and profile context included.
+            Safety stays rule-based. A sufficiently trained first-party ranker may
+            order safe candidates, while language AI only classifies a follow-up.
           </p>
         </div>
 

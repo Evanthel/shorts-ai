@@ -1,4 +1,10 @@
-import type { FeedbackRating } from "./domain";
+import type {
+  ActivityInput,
+  ComfortContextKey,
+  ComfortContextStats,
+  ComfortMemory,
+  FeedbackRating,
+} from "./domain";
 
 export type FeedbackStats = {
   total: number;
@@ -59,14 +65,90 @@ export function projectFeedbackStats(
 
 export function getFeedbackTemperatureDelta(feedback: FeedbackRating) {
   if (feedback === "too_cold") {
-    return -1;
+    return -0.5;
   }
 
   if (feedback === "too_warm") {
-    return 1;
+    return 0.5;
   }
 
   return 0;
+}
+
+export function getComfortContextKey(activity: ActivityInput): ComfortContextKey {
+  if (activity.mode === "running") {
+    return `running:${activity.intensity ?? "medium"}`;
+  }
+
+  if (activity.mode === "commute") {
+    return `commute:${activity.commute?.mode ?? "walking"}`;
+  }
+
+  return "walking";
+}
+
+export function getContextTemperatureOffset(
+  activity: ActivityInput,
+  comfortMemory: ComfortMemory | undefined,
+  legacyOffsetC = 0,
+) {
+  return comfortMemory?.[getComfortContextKey(activity)]?.offsetC ?? clampComfortOffset(legacyOffsetC);
+}
+
+export function updateComfortMemory(
+  comfortMemory: ComfortMemory | undefined,
+  activity: ActivityInput,
+  feedback: FeedbackRating,
+): ComfortMemory {
+  const key = getComfortContextKey(activity);
+  const current: ComfortContextStats = comfortMemory?.[key] ?? {
+    offsetC: 0,
+    outcomes: 0,
+    good: 0,
+    tooCold: 0,
+    tooWarm: 0,
+  };
+  const nextOffset = clampComfortOffset(current.offsetC + getFeedbackTemperatureDelta(feedback));
+
+  return {
+    ...(comfortMemory ?? {}),
+    [key]: {
+      offsetC: nextOffset,
+      outcomes: current.outcomes + 1,
+      good: current.good + (feedback === "good" ? 1 : 0),
+      tooCold: current.tooCold + (feedback === "too_cold" ? 1 : 0),
+      tooWarm: current.tooWarm + (feedback === "too_warm" ? 1 : 0),
+    },
+  };
+}
+
+export function clampComfortOffset(value: number) {
+  return Math.max(-4, Math.min(4, Math.round(value * 2) / 2));
+}
+
+export function normalizeComfortMemory(value: unknown): ComfortMemory {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const memory: ComfortMemory = {};
+  for (const [key, stats] of Object.entries(value)) {
+    if (!isComfortContextKey(key) || !stats || typeof stats !== "object" || Array.isArray(stats)) continue;
+    const candidate = stats as Record<string, unknown>;
+    if (![candidate.offsetC, candidate.outcomes, candidate.good, candidate.tooCold, candidate.tooWarm]
+      .every((item) => typeof item === "number" && Number.isFinite(item))) continue;
+    memory[key] = {
+      offsetC: clampComfortOffset(candidate.offsetC as number),
+      outcomes: Math.max(0, Math.floor(candidate.outcomes as number)),
+      good: Math.max(0, Math.floor(candidate.good as number)),
+      tooCold: Math.max(0, Math.floor(candidate.tooCold as number)),
+      tooWarm: Math.max(0, Math.floor(candidate.tooWarm as number)),
+    };
+  }
+  return memory;
+}
+
+function isComfortContextKey(value: string): value is ComfortContextKey {
+  return value === "walking" ||
+    /^running:(easy|medium|hard)$/.test(value) ||
+    /^commute:(walking|transit|bicycle|car)$/.test(value);
 }
 
 export function getFeedbackChangeNote(feedback: FeedbackRating, nextTemperatureOffsetC: number) {
