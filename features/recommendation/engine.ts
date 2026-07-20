@@ -1,1 +1,1 @@
-export { createRecommendation } from "@shorts-ai/core";
+export { createRecommendation, createRecommendationResult } from "@shorts-ai/core";

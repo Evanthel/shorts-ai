@@ -8,7 +8,11 @@ const config: ExpoConfig = {
   orientation: "portrait",
   userInterfaceStyle: "light",
   platforms: ["ios"],
-  plugins: ["expo-secure-store"],
+  plugins: [
+    "expo-secure-store",
+    "expo-notifications",
+    "@react-native-community/datetimepicker",
+  ],
   ios: {
     supportsTablet: false,
     bundleIdentifier: "app.shortsai.beta",

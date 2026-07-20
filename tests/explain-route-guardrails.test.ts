@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { POST } from "../app/api/explain/route";
-import { createRecommendation } from "@shorts-ai/core";
+import { createRecommendation, createRecommendationResult } from "@shorts-ai/core";
 import type { RecommendationInput, WeatherSnapshot } from "@shorts-ai/core";
 
 describe("/api/explain request guardrails", () => {
@@ -100,6 +100,28 @@ describe("/api/explain request guardrails", () => {
       restoreEnv("REQUIRE_PERSISTENT_RATE_LIMIT", previousRequirePersistentRateLimit);
       restoreEnv("RATE_LIMIT_HASH_SECRET", previousRateLimitHashSecret);
     }
+  });
+
+  it("handles shortcut adjustments deterministically without an LLM", async () => {
+    const input = createInput();
+    const recommendationResult = createRecommendationResult(input);
+    const response = await POST(new Request("https://shorts-ai.test/api/explain", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        input,
+        recommendation: recommendationResult.recommendation,
+        recommendationResult,
+        source: "shortcut",
+        intent: "adjust_warmer",
+      }),
+    }));
+    const body = await response.json() as { source: string; action: string; recommendationResult?: { selectedVariantId: string } };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.source, "deterministic");
+    assert.equal(body.action, "recalculate");
+    assert.equal(body.recommendationResult?.selectedVariantId, "variant-warmer");
   });
 });
 

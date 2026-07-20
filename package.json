@@ -15,15 +15,19 @@
     "mobile:start": "npm --workspace @shorts-ai/mobile run start",
     "mobile:ios": "npm --workspace @shorts-ai/mobile run ios",
     "mobile:typecheck": "npm --workspace @shorts-ai/mobile run typecheck",
+    "dataset:export": "tsx scripts/export-swaop.ts",
     "check": "npm run lint && npm run test && npm run build && npm run mobile:typecheck"
   },
   "dependencies": {
+    "@openrouter/ai-sdk-provider": "^3.0.0",
     "@shorts-ai/core": "file:packages/core",
     "@supabase/supabase-js": "^2.106.2",
     "@vercel/speed-insights": "^2.0.0",
+    "ai": "^7.0.31",
     "next": "^16.2.6",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

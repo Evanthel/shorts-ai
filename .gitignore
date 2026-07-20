@@ -63,6 +63,10 @@ __pycache__/
 .venv/
 venv/
 
+# First-party datasets and trained model artifacts
+swaop-*.jsonl
+ml/artifacts/
+
 # OS and editor files
 .DS_Store
 .idea/

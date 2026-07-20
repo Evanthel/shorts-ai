@@ -8,14 +8,13 @@ import { createRecommendation } from "@shorts-ai/core";
 import type { RecommendationInput, WeatherSnapshot } from "@shorts-ai/core";
 
 describe("explanation follow-up guardrail", () => {
-  it("allows questions about the current outfit plan", () => {
-    assert.equal(isFollowUpInScope("Do I really need a hoodie for this run?"), true);
-    assert.equal(isFollowUpInScope("Will the wind make the return colder?"), true);
+  it("accepts supported structured intents", () => {
+    assert.equal(isFollowUpInScope(undefined, "rain_wind"), true);
+    assert.equal(isFollowUpInScope(undefined, "adjust_warmer"), true);
   });
 
-  it("blocks unrelated general knowledge questions", () => {
-    assert.equal(isFollowUpInScope("What is peanut butter?"), false);
-    assert.equal(isFollowUpInScope("Who invented the piano?"), false);
+  it("blocks the structured out-of-scope intent", () => {
+    assert.equal(isFollowUpInScope(undefined, "out_of_scope"), false);
   });
 
   it("uses a scoped fallback for unrelated questions", () => {
@@ -23,10 +22,10 @@ describe("explanation follow-up guardrail", () => {
     const explanation = createFallbackExplanation({
       input,
       recommendation: createRecommendation(input),
-      question: "What is peanut butter?",
+      intent: "out_of_scope",
     });
 
-    assert.match(explanation, /I can only answer follow-up questions/);
+    assert.match(explanation, /I can only help/);
     assert.doesNotMatch(explanation.toLowerCase(), /peanut butter is/);
   });
 });

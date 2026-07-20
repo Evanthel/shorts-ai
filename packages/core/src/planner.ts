@@ -1,5 +1,7 @@
 import type {
   ActivityMode,
+  ComfortMemory,
+  CommuteMode,
   RecommendationInput,
   RunningIntensity,
   StarterProfile,
@@ -14,6 +16,9 @@ export type PlannerForm = {
   durationMinutes: number;
   returnHomeTime: string;
   intensity: RunningIntensity;
+  commuteMode: CommuteMode;
+  outdoorMinutes: number;
+  canCarryLayer: boolean;
 };
 
 export function createInitialPlannerForm(now = new Date()): PlannerForm {
@@ -27,6 +32,9 @@ export function createInitialPlannerForm(now = new Date()): PlannerForm {
     durationMinutes: 45,
     returnHomeTime: toDateTimeInputValue(returnHome),
     intensity: "medium",
+    commuteMode: "transit",
+    outdoorMinutes: 20,
+    canCarryLayer: true,
   };
 }
 
@@ -35,6 +43,7 @@ export function buildRecommendationInput(
   forecast: LocationForecast,
   ratedRecommendations: number,
   temperatureOffsetC: number,
+  comfortMemory?: ComfortMemory,
 ): RecommendationInput {
   const finishTime = toDateTimeInputValue(addMinutes(new Date(form.startTime), form.durationMinutes));
 
@@ -48,11 +57,19 @@ export function buildRecommendationInput(
       durationMinutes: form.durationMinutes,
       returnHomeTime: form.returnHomeTime,
       intensity: form.mode === "running" ? form.intensity : undefined,
+      commute: form.mode === "commute"
+        ? {
+            mode: form.commuteMode,
+            outdoorMinutes: form.outdoorMinutes,
+            canCarryLayer: form.canCarryLayer,
+          }
+        : undefined,
     },
     personalization: {
       starterProfile: form.starterProfile,
       ratedRecommendations,
       temperatureOffsetC,
+      comfortMemory,
     },
   };
 }
