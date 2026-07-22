@@ -1454,6 +1454,40 @@ h3 {
   line-height: 1.35;
 }
 
+.recommendation-guidance {
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+
+.recommendation-guidance > div {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 0.32fr) minmax(0, 1fr);
+  gap: 1rem;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.recommendation-guidance dt,
+.recommendation-guidance dd,
+.technical-details dt,
+.technical-details dd {
+  margin: 0;
+}
+
+.recommendation-guidance dt {
+  color: var(--violet);
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.recommendation-guidance dd {
+  color: var(--ink);
+  font-weight: 780;
+  line-height: 1.45;
+}
+
 .reminder-strip {
   display: flex;
   flex-wrap: wrap;
@@ -1548,6 +1582,33 @@ h3 {
 
 .explanation-panel small {
   color: var(--violet);
+  font-weight: 850;
+}
+
+.technical-details {
+  margin-top: 0.8rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.technical-details summary {
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.technical-details dl {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.8rem 0 0;
+}
+
+.technical-details dl > div {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 0.32fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.technical-details dt {
   font-weight: 850;
 }
 
@@ -2001,6 +2062,12 @@ h3 {
   .demo-form,
   .phase-grid {
     grid-template-columns: 1fr;
+  }
+
+  .recommendation-guidance > div,
+  .technical-details dl > div {
+    grid-template-columns: 1fr;
+    gap: 0.3rem;
   }
 
   .signal-step {

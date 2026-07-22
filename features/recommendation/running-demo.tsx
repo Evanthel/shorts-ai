@@ -21,6 +21,7 @@ import {
 import type { FeedbackStats, RecommendationHistoryItem } from "@/features/recommendation/persistence";
 import {
   buildRecommendationInput,
+  createRecommendationPresentation,
   createInitialPlannerForm,
   createRecommendationResult,
   emptyFeedbackStats,
@@ -103,6 +104,9 @@ export function RunningDemo() {
     : null, [form, forecast, ratedRecommendations, temperatureOffsetC, comfortMemory]);
   const recommendation = result?.recommendation ?? null;
   const selectedVariant = result?.variants.find((variant) => variant.id === result.selectedVariantId) ?? null;
+  const presentation = useMemo(() => recommendationInput && result
+    ? createRecommendationPresentation(recommendationInput, result)
+    : null, [recommendationInput, result]);
   const activePending = pendingFeedback.find((item) => item.id === activePendingId) ?? null;
   const contextualFollowUpNeeded = feedbackRating !== "good" || actuallyWorn === "with_changes" || actuallyWorn === "no";
 
@@ -376,25 +380,28 @@ export function RunningDemo() {
         </form>
 
         <article className="recommendation-panel" aria-live="polite">
-          {recommendation && recommendationInput && result ? <>
+          {recommendation && recommendationInput && result && presentation ? <>
             <div className="panel-topline"><span>{recommendationInput.current.locationLabel}</span><strong>{recommendation.confidenceScore}% confidence</strong></div>
             <h3>{recommendation.headline}</h3>
-            <p className="activity-context">{activityLabel(form.mode)} · {result.engineVersion} · {result.source} · safety {result.safetyPolicyVersion}</p>
-            <div className="weather-strip live-weather">
-              <span>Start feels like {recommendationInput.current.feelsLikeC} C</span>
-              <span>Wind {recommendationInput.current.windKph} km/h</span>
-              <span>Return feels like {recommendationInput.forecastAtReturn.feelsLikeC} C</span>
-            </div>
+            <p className="activity-context">{activityLabel(form.mode)}</p>
             <div className="feedback-actions" aria-label="Outfit variants">
               {result.variants.map((variant) => <button key={variant.id} type="button" className={variant.id === result.selectedVariantId ? "active" : ""} onClick={() => chooseVariant(variant.id)}>
                 {variant.kind === "standard" ? "Standard" : variant.kind === "lighter" ? "Choose lighter" : "Choose warmer"}
               </button>)}
             </div>
-            {recommendation.running ? <div className="phase-grid">
-              <OutfitPhase title="Warm-up" items={recommendation.running.warmUp} />
-              <OutfitPhase title="Main run" items={recommendation.running.mainRun} />
-              <OutfitPhase title="Post-run" items={recommendation.running.postRun} />
-            </div> : <div className="phase-grid single-phase"><OutfitPhase title="Recommended outfit" items={selectedVariant?.outfit ?? recommendation.outfit} /></div>}
+            <div className="phase-grid single-phase">
+              <OutfitPhase title={recommendation.running ? "Wear for the main run" : "Wear"} items={presentation.wear} />
+            </div>
+            <dl className="recommendation-guidance" aria-label="Outfit timing and carry guidance">
+              {presentation.start ? <GuidanceItem label="At the start" value={formatItems(presentation.start)} /> : null}
+              <GuidanceItem label="Carry" value={presentation.carry.length ? formatItems(presentation.carry) : "No separate layer"} />
+              <GuidanceItem label="For the return" value={`${formatItems(presentation.forReturn)}. ${presentation.returnSummary}`} />
+            </dl>
+            <div className="weather-strip live-weather">
+              <span>Start feels like {recommendationInput.current.feelsLikeC} C</span>
+              <span>Wind {recommendationInput.current.windKph} km/h</span>
+              <span>Return feels like {recommendationInput.forecastAtReturn.feelsLikeC} C</span>
+            </div>
             {selectedVariant?.requiredItems.length ? <div className="profile-change-note">
               <p>Safety required: {selectedVariant.requiredItems.map((item) => clothingLabels[item]).join(", ")}.</p>
               <div className="feedback-actions">{selectedVariant.requiredItems.map((item) => <button key={item} type="button" onClick={() => setRejectedRequiredItems((current) => current.includes(item) ? current.filter((value) => value !== item) : [...current, item])}>
@@ -410,6 +417,15 @@ export function RunningDemo() {
               <div className="feedback-actions">{shortcutQuestions[form.mode].map((shortcut) => <button key={shortcut.intent} type="button" onClick={() => ask(shortcut.intent)}>{shortcut.label}</button>)}</div>
               <p className="explanation-message">{explanation || explanationStatus}</p>
               <div className="follow-up-row"><input value={followUpQuestion} onChange={(event) => setFollowUpQuestion(event.target.value)} maxLength={300} placeholder="Ask another question" aria-label="Ask another question" /><button type="button" onClick={() => ask()} disabled={followUpQuestion.trim().length < 3}>Ask</button></div>
+            </details>
+            <details className="technical-details">
+              <summary>Technical details</summary>
+              <dl>
+                <div><dt>Engine</dt><dd>{result.engineVersion}</dd></div>
+                <div><dt>Source</dt><dd>{result.source}</dd></div>
+                {result.modelVersion ? <div><dt>Model</dt><dd>{result.modelVersion}</dd></div> : null}
+                <div><dt>Safety policy</dt><dd>{result.safetyPolicyVersion}</dd></div>
+              </dl>
             </details>
           </> : <div className="empty-recommendation"><h3>Choose a location to generate a recommendation.</h3></div>}
         </article>
@@ -459,6 +475,14 @@ function Field({ label, id, children }: { label: string; id: string; children: R
 
 function OutfitPhase({ title, items }: { title: string; items: ClothingItem[] }) {
   return <section className="phase"><span>{title}</span><p>{items.map((item) => clothingLabels[item]).join(", ")}</p></section>;
+}
+
+function GuidanceItem({ label, value }: { label: string; value: string }) {
+  return <div><dt>{label}</dt><dd>{value}</dd></div>;
+}
+
+function formatItems(items: ClothingItem[]) {
+  return items.map((item) => clothingLabels[item]).join(", ");
 }
 
 function ChoiceRow({ values, selected, onSelect }: { values: string[]; selected: string | null; onSelect: (value: string) => void }) {

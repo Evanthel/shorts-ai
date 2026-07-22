@@ -19,16 +19,19 @@ import type { User } from "@supabase/supabase-js";
 import {
   buildRecommendationInput,
   createInitialPlannerForm,
+  createRecommendationPresentation,
   createRecommendationResult,
   emptyFeedbackStats,
   fetchLocationForecast,
   formatClockTime,
   formatLocationLabel,
   getContextTemperatureOffset,
+  getMissingPlanFields,
   mergeClockTimeIntoDate,
   projectFeedbackStats,
   searchLocations,
   shiftPlannerStartTime,
+  shouldAutoRevealRecommendation,
   shortcutQuestions,
   starterProfiles,
   updateComfortMemory,
@@ -108,6 +111,7 @@ export default function App() {
   const scrollRef = useRef<ScrollView>(null);
   const recommendationY = useRef(0);
   const wasPlanComplete = useRef(false);
+  const hasAutoRevealed = useRef(false);
   const shouldRevealRecommendation = useRef(false);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [form, setForm] = useState<PlannerForm>(() => createInitialPlannerForm());
@@ -144,6 +148,7 @@ export default function App() {
   const [question, setQuestion] = useState("");
   const [explanationStatus, setExplanationStatus] = useState("Choose a shortcut or ask another question.");
   const [explanationOpen, setExplanationOpen] = useState(false);
+  const [technicalDetailsOpen, setTechnicalDetailsOpen] = useState(false);
   const [rejectedRequiredItems, setRejectedRequiredItems] = useState<ClothingItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -151,20 +156,24 @@ export default function App() {
   const [timePickerTarget, setTimePickerTarget] = useState<TimePickerTarget | null>(null);
   const [timePickerValue, setTimePickerValue] = useState(new Date());
 
-  const missingPlanFields = [
-    !forecast ? "location" : null,
-    !selectedStarterProfile ? "comfort profile" : null,
-    form.mode === "running" && !selectedRunningIntensity ? "intensity" : null,
-    form.mode === "commute" && !selectedCommuteMode ? "commute mode" : null,
-    form.mode === "commute" && !outdoorMinutesInput.trim() ? "outdoor time" : null,
-    form.mode === "commute" && canCarryLayerChoice === null ? "extra layer choice" : null,
-  ].filter((value): value is string => Boolean(value));
+  const missingPlanFields = getMissingPlanFields({
+    mode: form.mode,
+    hasForecast: Boolean(forecast),
+    starterProfile: selectedStarterProfile,
+    runningIntensity: selectedRunningIntensity,
+    commuteMode: selectedCommuteMode,
+    hasOutdoorMinutes: Boolean(outdoorMinutesInput.trim()),
+    canCarryLayer: canCarryLayerChoice,
+  });
   const planComplete = missingPlanFields.length === 0;
   const recommendationInput = useMemo(() => forecast && planComplete
     ? buildRecommendationInput(form, forecast, ratedRecommendations, temperatureOffsetC, comfortMemory)
     : null, [form, forecast, ratedRecommendations, temperatureOffsetC, comfortMemory, planComplete]);
   const recommendation = result?.recommendation ?? null;
   const selectedVariant = result?.variants.find((variant) => variant.id === result.selectedVariantId) ?? null;
+  const presentation = useMemo(() => recommendationInput && result
+    ? createRecommendationPresentation(recommendationInput, result)
+    : null, [recommendationInput, result]);
   const activePending = pendingItems.find((item) => item.id === activePendingId) ?? null;
   const needsContext = feedbackRating !== "good" || actuallyWorn === "with_changes" || actuallyWorn === "no";
 
@@ -285,7 +294,14 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (planComplete && !wasPlanComplete.current) shouldRevealRecommendation.current = true;
+    if (shouldAutoRevealRecommendation({
+      wasComplete: wasPlanComplete.current,
+      isComplete: planComplete,
+      hasRevealed: hasAutoRevealed.current,
+    })) {
+      shouldRevealRecommendation.current = true;
+      hasAutoRevealed.current = true;
+    }
     if (!planComplete) {
       shouldRevealRecommendation.current = false;
       setResult(null);
@@ -547,7 +563,7 @@ export default function App() {
       <Section title="Plan">
         <View style={styles.locationRow}>
           <View style={styles.flex}>
-            <Text style={styles.locationName} numberOfLines={1}>{forecast ? recommendationInput?.current.locationLabel : "Choose location"}</Text>
+            <Text style={styles.locationName} numberOfLines={1}>{forecast ? formatLocationLabel(forecast.location) : "Choose location"}</Text>
             <Text style={styles.note} numberOfLines={2}>{weatherStatus}</Text>
           </View>
           {busy ? <ActivityIndicator color="#173d2a" /> : <Action label={locationSearchOpen ? "Close" : "Change"} small onPress={() => setLocationSearchOpen((current) => !current)} />}
@@ -620,20 +636,21 @@ export default function App() {
 
       <View onLayout={(event) => { recommendationY.current = event.nativeEvent.layout.y; }}>
         <Section title="Recommendation">
-          {recommendation && recommendationInput && result ? <>
+          {recommendation && recommendationInput && result && presentation ? <>
             <Text style={styles.headline}>{recommendation.headline}</Text>
             <Text style={styles.note}>{recommendationInput.current.locationLabel} · {recommendation.confidenceScore}% confidence</Text>
+            <Segment equal compact values={result.variants.map((variant) => variant.id)} selected={result.selectedVariantId} label={(id) => result.variants.find((variant) => variant.id === id)?.kind ?? id} onSelect={(id) => chooseVariant(String(id))} />
+            <Outfit title={recommendation.running ? "Wear for the main run" : "Wear"} items={presentation.wear} />
+            <View style={styles.guidance}>
+              {presentation.start ? <GuidanceRow label="At the start" value={formatItems(presentation.start)} /> : null}
+              <GuidanceRow label="Carry" value={presentation.carry.length ? formatItems(presentation.carry) : "No separate layer"} />
+              <GuidanceRow label="For the return" value={`${formatItems(presentation.forReturn)}. ${presentation.returnSummary}`} />
+            </View>
             <View style={styles.weatherRow}>
               <Metric label="Start" value={`${recommendationInput.current.feelsLikeC} C`} />
               <Metric label="Wind" value={`${recommendationInput.current.windKph} km/h`} />
               <Metric label="Return" value={`${recommendationInput.forecastAtReturn.feelsLikeC} C`} />
             </View>
-            <Segment equal compact values={result.variants.map((variant) => variant.id)} selected={result.selectedVariantId} label={(id) => result.variants.find((variant) => variant.id === id)?.kind ?? id} onSelect={(id) => chooseVariant(String(id))} />
-            {recommendation.running ? <>
-              <Outfit title="Warm-up" items={recommendation.running.warmUp} />
-              <Outfit title="Main run" items={recommendation.running.mainRun} />
-              <Outfit title="Post-run" items={recommendation.running.postRun} />
-            </> : <Outfit title="Selected outfit" items={selectedVariant?.outfit ?? recommendation.outfit} />}
             {selectedVariant?.requiredItems.length ? <View style={styles.feedbackBox}>
               <Text style={styles.warning}>Safety required: {selectedVariant.requiredItems.map((item) => labels[item]).join(", ")}.</Text>
               <View style={styles.chips}>{selectedVariant.requiredItems.map((item) => <Action key={item} small label={rejectedRequiredItems.includes(item) ? `Warning active: ${labels[item]}` : `I won't wear ${labels[item]}`} onPress={() => setRejectedRequiredItems((current) => current.includes(item) ? current.filter((value) => value !== item) : [...current, item])} />)}</View>
@@ -654,7 +671,15 @@ export default function App() {
                 <Action label="Ask" onPress={() => ask()} disabled={question.trim().length < 3} />
               </View>
             </View> : null}
-            <Text style={styles.meta}>{result.engineVersion} · {result.source} · safety {result.safetyPolicyVersion}</Text>
+            <Pressable style={styles.disclosure} onPress={() => setTechnicalDetailsOpen((current) => !current)} accessibilityRole="button">
+              <Text style={styles.disclosureText}>Technical details</Text>
+              <Text style={styles.disclosureIcon}>{technicalDetailsOpen ? "−" : "+"}</Text>
+            </Pressable>
+            {technicalDetailsOpen ? <View style={styles.technicalPanel}>
+              <Text style={styles.meta}>Engine {result.engineVersion}</Text>
+              <Text style={styles.meta}>Source {result.source}{result.modelVersion ? ` · model ${result.modelVersion}` : ""}</Text>
+              <Text style={styles.meta}>Safety policy {result.safetyPolicyVersion}</Text>
+            </View> : null}
           </> : <View style={styles.emptyState}>
             {busy ? <ActivityIndicator color="#173d2a" /> : null}
             <Text style={styles.note}>{missingPlanFields.length ? `Complete the plan: ${missingPlanFields.join(", ")}.` : "Preparing your recommendation..."}</Text>
@@ -780,6 +805,13 @@ function Outfit({ title, items }: { title: string; items: ClothingItem[] }) {
   return <View style={styles.outfit}><Text style={styles.label}>{title}</Text><Text style={styles.outfitText}>{items.map((item) => labels[item]).join(", ")}</Text></View>;
 }
 
+function GuidanceRow({ label, value }: { label: string; value: string }) {
+  return <View style={styles.guidanceRow}>
+    <Text style={styles.guidanceLabel}>{label}</Text>
+    <Text style={styles.guidanceValue}>{value}</Text>
+  </View>;
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return <View style={styles.metric}><Text style={styles.note}>{label}</Text><Text style={styles.metricValue}>{value}</Text></View>;
 }
@@ -802,6 +834,10 @@ function record(value: unknown): Record<string, unknown> {
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
+
+function formatItems(items: ClothingItem[]) {
+  return items.map((item) => labels[item]).join(", ");
 }
 
 function locationId(latitude: number, longitude: number) {
@@ -867,6 +903,10 @@ const styles = StyleSheet.create({
   metricValue: { fontSize: 15, fontWeight: "800", marginTop: 2, color: "#17231c" },
   outfit: { padding: 11, backgroundColor: "#f7f8f5", borderRadius: 10, gap: 3 },
   outfitText: { color: "#25342c", lineHeight: 19 },
+  guidance: { borderTopWidth: 1, borderBottomWidth: 1, borderColor: "#e1e4df" },
+  guidanceRow: { paddingVertical: 10, flexDirection: "row", gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e1e4df" },
+  guidanceLabel: { width: 86, fontSize: 11, fontWeight: "800", color: "#557063", textTransform: "uppercase", letterSpacing: 0.6 },
+  guidanceValue: { flex: 1, color: "#25342c", lineHeight: 18 },
   warning: { padding: 9, borderRadius: 9, backgroundColor: "#fff3d8", color: "#674c13", lineHeight: 18 },
   feedbackBox: { gap: 10, paddingTop: 4 },
   disclosure: { minHeight: 44, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderTopWidth: 1, borderTopColor: "#e1e4df", marginTop: 2, paddingTop: 8 },
@@ -874,6 +914,7 @@ const styles = StyleSheet.create({
   disclosureIcon: { fontSize: 22, color: "#173d2a" },
   explanationPanel: { gap: 10 },
   explanation: { lineHeight: 20, color: "#34423a" },
+  technicalPanel: { gap: 4, paddingBottom: 2 },
   emptyState: { minHeight: 76, alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 24 },
   divider: { height: 1, backgroundColor: "#e1e4df", marginVertical: 4 },
   modalLayer: { flex: 1, justifyContent: "flex-end" },

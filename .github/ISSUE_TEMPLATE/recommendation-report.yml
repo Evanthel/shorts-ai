@@ -1,0 +1,93 @@
+name: Recommendation report
+description: Report an outfit recommendation that was unsafe, unclear, or unsuitable.
+title: "[Recommendation]: "
+labels:
+  - recommendation
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use broad weather and location context only. Do not include an exact address, email, token, or raw AI question.
+  - type: input
+    id: version
+    attributes:
+      label: App version or commit
+      placeholder: e.g. TestFlight 42 or abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - iPhone
+        - Web
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and OS
+      placeholder: e.g. iPhone 15, iOS 19
+  - type: input
+    id: scenario
+    attributes:
+      label: Scenario and activity
+      description: Include a dogfooding scenario ID when applicable.
+      placeholder: e.g. D08, transit commute, 15 minutes outdoors
+    validations:
+      required: true
+  - type: textarea
+    id: weather
+    attributes:
+      label: Broad weather conditions
+      description: Use a temperature range and general conditions, not an exact location.
+      placeholder: e.g. 0–3 C, light rain, moderate wind, evening
+    validations:
+      required: true
+  - type: dropdown
+    id: variant
+    attributes:
+      label: Selected variant
+      options:
+        - Lighter
+        - Standard
+        - Warmer
+        - Only one variant was available
+    validations:
+      required: true
+  - type: dropdown
+    id: worn
+    attributes:
+      label: Was the outfit worn?
+      options:
+        - Yes
+        - With changes
+        - No
+        - Not yet
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety impact
+      options:
+        - label: This may involve a cold, heat, rain, wind, or visibility risk.
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Describe the outfit, timing guidance, and outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include only sanitized details needed to reproduce the issue.
