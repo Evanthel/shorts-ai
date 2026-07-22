@@ -87,6 +87,7 @@ end;
 $$;
 
 revoke all on function public.consume_ai_rate_limit(text, integer, integer) from public;
+revoke execute on function public.consume_ai_rate_limit(text, integer, integer) from anon, authenticated;
 
 do $$
 begin
