@@ -123,6 +123,8 @@ npm run check
 
 This runs lint, unit/API/migration tests, the Next.js production build, and the mobile TypeScript check.
 
+For physical-device testing, expected weather scenarios, privacy-safe reporting, and pre-ML metrics, use the [dogfooding guide](./docs/dogfooding.md).
+
 ## Privacy and license
 
 Authenticated recommendation and feedback data is protected by user-scoped Supabase RLS. Guest pending feedback stays in local storage and is excluded from training. See the in-app Privacy and Terms pages for product-facing details.
